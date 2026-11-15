@@ -1,0 +1,4 @@
+# FILE: requirements.txt
+# PURPOSE: Production Server Dependency (Zero Heavy ML Frameworks, Zero DB Drivers)
+
+numpy>=1.24.0,<2.2.0

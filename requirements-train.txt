@@ -1,0 +1,6 @@
+# FILE: requirements-train.txt
+# PURPOSE: Offline Training & PyArmor Obfuscation (NEVER install on Production Server)
+
+numpy>=1.24.0,<2.2.0
+torch>=2.1.0
+pyarmor>=8.5.0
