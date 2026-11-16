@@ -1,6 +1,6 @@
 # FILE: build_greetings_txt.py
-# PURPOSE: Build 100% pure greetings.txt (Class 1) AND comprehensive negatives.txt (Class 0)
-# PYARMOR COMPATIBLE: < 230 lines, < 9.5 KB
+# PURPOSE: Build 100% pure greetings.txt (Class 1) & anti-poisoned negatives.txt (Class 0)
+# PYARMOR COMPATIBLE: < 245 lines, < 10 KB
 
 import json
 import logging
@@ -15,7 +15,15 @@ logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
 
 CLEAN_CHARS_RE = re.compile(r"^[a-z\s'!?.,]+$")
 SPACE_RE = re.compile(r"\s+")
-REPEAT_CHAR_RE = re.compile(r"(.)\1{3,}")
+REPEAT_CHAR_RE = re.compile(r"(.)\1{2,}")
+
+# Prevents JSONL/HF lines starting with greeting words from accidentally entering negatives.txt
+GREETING_PREFIX_GUARD_RE = re.compile(
+    r"^(?:h+i+|h+e+y+|h+e+l+o+|h+l+o+|h+y+|h+i+e+|h+e+i+|h+i+y+a+|h+e+y+a+|e+l+o+|"
+    r"y+o+|s+u+p+|w+a+s+u+p+|w+h+a+t+'?s\s+u+p+|h+o+w+d+y+|g+o+o+d\s+m+o+r+n+i+n+g*|"
+    r"m+o+r+n+i+n+g*|g+o+o+d\s+e+v+e+n+i+n+g*|g+r+e+e+t+i+n+g+s*|w+e+l+c+o+m+e+|h+r+u+|h+y+d+)\b",
+    re.IGNORECASE,
+)
 
 STRICT_GREETING_RE = re.compile(
     r"^(?:"
@@ -31,7 +39,7 @@ STRICT_GREETING_RE = re.compile(
     r")"
     r"(?:[\s,!?.]+(?:"
     r"t+h+e+r+e+|y+o+u|u|f+r+i+e+n+d+|s+t+r+a+n+g+e+r+|c+u+t+i+e+|g+o+r+g+e+o+u+s+|h+a+n+d+s+o+m+e+|"
-    r"b+r+o+|m+a+n+|m+a+t+e+|b+u+d+d+y+|a+l+l+|e+v+e+r+y+o+n+e+|"
+    r"b+r+o+|b+u+d+d+y+|a+l+l+|e+v+e+r+y+o+n+e+|"
     r"h+o+w\s+(?:a+r+e|r)\s+(?:y+o+u|u)|h+r+u+|h+y+d+|w+h+a+t+'?s\s+u+p+|w+a+s+u+p+|"
     r"h+o+w+'?s\s+i+t\s+g+o+i+n+g*|n+i+c+e\s+t+o\s+m+e+e+t\s+(?:y+o+u|u)|"
     r"g+o+o+d\s+m+o+r+n+i+n+g+|g+o+o+d\s+e+v+e+n+i+n+g+"
@@ -43,12 +51,14 @@ BLACKLIST_WORDS = frozenset((
     "siri", "alexa", "cortana", "google", "olly", "computer", "bot", "robot", "assistant",
     "help", "order", "refund", "price", "cost", "weather", "music", "timer", "alarm",
     "account", "ticket", "support", "problem", "issue", "cancel", "stop", "bye", "night",
+    "from", "age", "old", "tun", "tunisia", "usa", "uk", "india", "france", "germany",
+    "im", "i'm", "l'm", "male", "female", "boy", "girl", "m", "f",
 ))
 
 HELLO_SALUTATIONS = (
-    "hi", "hii", "hiii", "hiiii", "hey", "heyy", "heyyy", "heyyyy",
-    "hello", "helloo", "hellooo", "yo", "yoo", "yooo", "hiya", "hiyaa",
-    "heya", "heyaa", "howdy", "ello", "hlo", "hy", "hyy", "hie", "hei", "hullo",
+    "hi", "hii", "hiii", "hey", "heyy", "heyyy", "hello", "helloo", "hellooo",
+    "yo", "yoo", "yooo", "hiya", "hiyaa", "heya", "heyaa", "howdy", "ello",
+    "hlo", "hy", "hyy", "hie", "hei", "hullo",
 )
 
 TIME_AND_FORMAL = (
@@ -57,7 +67,7 @@ TIME_AND_FORMAL = (
 )
 
 SLANG_AND_QUESTIONS = (
-    "sup", "supp", "suuup", "wassup", "wassupp", "wazzup", "whats up", "what's up",
+    "sup", "supp", "wassup", "wassupp", "wazzup", "whats up", "what's up",
     "what is up", "how are you", "how r u", "how are u", "how are ya", "how u doing",
     "how are you doing", "how are you today", "hows it going", "how's it going",
     "how is it going", "hows everything", "how have you been", "how is your day",
@@ -65,10 +75,7 @@ SLANG_AND_QUESTIONS = (
     "pleased to meet you", "glad to meet you", "good to see you", "long time no see",
 )
 
-TARGETS = (
-    "", "there", "u", "you", "friend", "stranger", "cutie",
-    "gorgeous", "handsome", "bro", "man", "mate", "buddy",
-)
+TARGETS = ("", "there", "u", "you", "friend", "stranger", "cutie", "gorgeous", "handsome", "bro", "buddy")
 
 FOLLOW_QUESTIONS = (
     "", "hru", "hyd", "whats up", "what's up", "wassup", "how r u", "how are u",
@@ -76,29 +83,32 @@ FOLLOW_QUESTIONS = (
     "nice to meet you", "good morning", "good evening",
 )
 
-ENDINGS = ("", "!", "!!", "?", ".")
+ENDINGS = ("", "!", "?")
 
+# Explicitly includes "hi m", "hi f", "hey m", "hey f", "hello m", "hello f" as Class 0
 CORE_HARD_NEGATIVES = (
-    "f or m", "m or f", "f?", "m?", "from?", "so", "m", "f", "u", "u d?", "u f?",
-    "m here", "f here", "same", "you in bed?", "your name?", "ur name?", "charlotte",
-    "from", "age?", "m bi", "do you get my text!", "how old are you", "where are you from",
-    "asl", "are you single", "are you a boy or girl", "what is your name",
-    "tunisia", "india", "usa", "uk", "canada", "germany", "france", "italy", "spain",
-    "18", "19", "20", "21", "22", "23", "24", "25", "26", "28", "30", "im 24", "i am 22",
+    "hi m", "hi f", "hey m", "hey f", "hello m", "hello f", "yo m", "yo f", "sup m", "sup f",
+    "hii m", "hii f", "heyy m", "heyy f", "m hi", "f hi", "m hey", "f hey", "hi m here", "hi f here",
+    "hi im from tun", "hi im from tunisia", "hey im from usa", "hello from tunisia",
+    "hi from tun", "hey from uk", "hi im twenty from tun", "hi m from tun", "hey f from usa",
+    "hi how old are you", "hey where are you from", "f or m", "m or f", "f?", "m?",
+    "from?", "so", "m", "f", "u", "u d?", "u f?", "m here", "f here", "same",
+    "you in bed?", "your name?", "ur name?", "charlotte", "from", "age?", "m bi",
+    "do you get my text!", "how old are you", "where are you from", "asl",
+    "are you single", "are you a boy or girl", "what is your name",
+    "tun", "tunisia", "india", "usa", "uk", "canada", "germany", "france", "italy", "spain",
     "help", "helping", "helper", "helmet", "helicopter", "hell", "shell", "high",
     "higher", "highway", "hill", "history", "historical", "him", "his", "hit",
     "hide", "hidden", "he", "her", "hers", "here", "hero", "hear", "heart",
-    "heat", "heavy", "health", "hello kitty", "hellod/", "hellod", "hellox",
-    "hi/", "/hello", "hi123", "xhello", "/start", "/help", "/stop", "http://",
-    "https://", "test/123", "good", "good job", "good luck", "good night", "gn",
-    "morning coffee", "morning news", "you", "your", "yours", "young", "youtube",
-    "yo mama", "supper", "super", "support", "supply", "how", "how old", "how much",
-    "how far", "how tall", "how to", "what time is it", "what do you do", "what",
-    "why", "who", "bye", "goodbye", "see you", "see ya", "take care", "later",
-    "cya", "gtg", "thank you", "thanks", "thx", "ty", "ok", "okay", "yes", "no",
-    "maybe", "lol", "haha", "bored", "bonjour", "salut", "coucou", "bonsoir",
-    "salam", "marhba", "ahla", "kifech", "hola", "buenos dias", "ciao", "hallo",
-    "namaste", "konnichiwa", "privet", "merhaba", "oi", "ola",
+    "heat", "heavy", "health", "hello kitty", "hellod", "hellox", "xhello",
+    "good", "good job", "good luck", "good night", "gn", "morning coffee", "morning news",
+    "you", "your", "yours", "young", "youtube", "yo mama", "supper", "super",
+    "support", "supply", "how", "how old", "how much", "how far", "how tall", "how to",
+    "what time is it", "what do you do", "what", "why", "who", "bye", "goodbye",
+    "see you", "see ya", "take care", "later", "cya", "gtg", "thank you", "thanks",
+    "thx", "ty", "ok", "okay", "yes", "no", "maybe", "lol", "haha", "bored",
+    "bonjour", "salut", "coucou", "bonsoir", "salam", "marhba", "ahla", "kifech",
+    "hola", "buenos dias", "ciao", "hallo", "namaste", "konnichiwa", "privet", "merhaba", "oi", "ola",
 )
 
 
@@ -121,6 +131,17 @@ def is_valid_clean_greeting(text):
     return s
 
 
+def is_safe_negative_line(s):
+    if not s or len(s) > 30 or not CLEAN_CHARS_RE.match(s):
+        return False
+    # Never allow a line starting with a greeting word into negatives.txt unless it has a blacklist word
+    if GREETING_PREFIX_GUARD_RE.match(s):
+        words = [w.strip("'!?.,") for w in s.split()]
+        if not any(w in BLACKLIST_WORDS for w in words):
+            return False
+    return True
+
+
 def pull_datasets_pos_and_neg(pos_set, neg_set):
     try:
         from datasets import load_dataset
@@ -133,8 +154,8 @@ def pull_datasets_pos_and_neg(pos_set, neg_set):
                 c = is_valid_clean_greeting(s)
                 if c:
                     pos_set.add(c)
-            elif len(neg_set) < 12000:
-                neg_set.add(s[:60])
+            elif len(neg_set) < 8000 and is_safe_negative_line(s[:30]):
+                neg_set.add(s[:30])
     except Exception:
         pass
 
@@ -151,12 +172,12 @@ def pull_datasets_pos_and_neg(pos_set, neg_set):
                     raw_t = str(rec.get("text", "")).strip()
                     if not raw_t or raw_t.startswith("[") or not raw_t.isascii():
                         continue
-                    norm = SPACE_RE.sub(" ", REPEAT_CHAR_RE.sub(r"\1\1\1", raw_t.lower())).strip()
+                    norm = SPACE_RE.sub(" ", REPEAT_CHAR_RE.sub(r"\1\1", raw_t.lower())).strip()
                     c = is_valid_clean_greeting(norm)
                     if c:
                         pos_set.add(c)
-                    elif norm and len(neg_set) < 18000:
-                        neg_set.add(norm[:60])
+                    elif len(neg_set) < 12000 and is_safe_negative_line(norm[:30]):
+                        neg_set.add(norm[:30])
         except Exception:
             pass
 
@@ -184,29 +205,18 @@ def generate_greetings_and_negatives(pos_path="greetings.txt", neg_path="negativ
     for tf in TIME_AND_FORMAL:
         for tgt in TARGETS:
             base = f"{tf} {tgt}".strip()
-            for end in ("", "!", "!!", "."):
+            for end in ("", "!"):
                 c = is_valid_clean_greeting(f"{base}{end}")
                 if c:
                     pos_set.add(c)
 
     for sq in SLANG_AND_QUESTIONS:
-        for tgt in ("", "there", "bro", "man", "mate", "stranger", "friend"):
+        for tgt in ("", "there", "bro", "stranger", "friend"):
             base = f"{sq} {tgt}".strip()
             for end in ENDINGS:
                 c = is_valid_clean_greeting(f"{base}{end}")
                 if c:
                     pos_set.add(c)
-
-    # Generate boundary-corrupted hard negatives from single-word roots
-    for g in HELLO_SALUTATIONS + ("sup", "wassup", "morning", "evening", "greetings", "welcome"):
-        for suf in ("d/", "/", "d", "x", "z", "q", "k", "p", "1", "9", "123", "_bot"):
-            neg_set.add(f"{g}{suf}")
-        for pre in ("/", "1", "x", "z", "http://"):
-            neg_set.add(f"{pre}{g}")
-        if len(g) >= 4:
-            neg_set.add(g[:-1] + "x")
-            neg_set.add(g[:-1] + "d")
-            neg_set.add(g[:-1] + "/")
 
     neg_set.difference_update(pos_set)
 
@@ -221,7 +231,7 @@ def generate_greetings_and_negatives(pos_path="greetings.txt", neg_path="negativ
             fn.write(line + "\n")
 
     print(f"[CLEAN BUILD] Wrote {len(sorted_pos)} pure greetings to '{pos_path}'", flush=True)
-    print(f"[CLEAN BUILD] Wrote {len(sorted_neg)} hard negatives to '{neg_path}'", flush=True)
+    print(f"[CLEAN BUILD] Wrote {len(sorted_neg)} anti-poisoned negatives to '{neg_path}'", flush=True)
 
 
 def generate_greetings_file(output_path="greetings.txt"):
