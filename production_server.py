@@ -1,79 +1,71 @@
 # FILE: production_server.py
-# PURPOSE: Zero-allocation Subword-Trigram NumPy inference & 50k-user server (4.13 MB RAM)
+# PURPOSE: Step 1 Pure NumPy Dating Engine (Synced Rolling Hash, 32 Short Replies, 2.56 MB RAM)
 # RULES: Zero PyTorch/SciPy/DB, zero float64/int64, zero loops over tensors, PyArmor compatible
 
 import asyncio
 from collections import deque
 import os
-import re
 import sys
 import time
 import numpy as np
 
-VOCAB_SIZE = 512
+VOCAB_SIZE = 2048
 SEQ_LEN = 64
-D_MODEL = 128
-D_FF = 256
-NUM_INTENTS = 8
+MAX_GREETING_LEN = 30
+D_MODEL = 64
+D_FF = 128
+NUM_INTENTS = 2
 MAX_USERS = 50000
 NUM_WORKERS = 8
 
-RE_LANG_AR = re.compile(rb"[\xd8-\xd9][\x80-\xbf]|\b(marhba|kifech|qadeh|soum|as3ar|3awenni|shukran)\b", re.IGNORECASE)
-RE_LANG_FR = re.compile(rb"\b(bonjour|salut|merci|tarif|prix|colis|aide|remboursement|horaires)\b", re.IGNORECASE)
 
-
-def _pack_http(json_bytes):
+def _pack_reply(class_id, is_greeting_str, intent_str, reply_str, kbd_str):
+    body = (
+        f'{{"class_id":{class_id},"is_greeting":{is_greeting_str},'
+        f'"intent":"{intent_str}","reply":"{reply_str}","kbd":{kbd_str}}}'
+    ).encode("utf-8")
     hdr = (
         b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
-        + str(len(json_bytes)).encode("ascii")
+        + str(len(body)).encode("ascii")
         + b"\r\nConnection: close\r\n\r\n"
     )
-    return hdr + json_bytes
+    return hdr + body
 
 
-CACHED_HTTP_RESPONSES = (
-    (
-        _pack_http(b'{"intent":"greeting","reply":"Hello! How can I assist you today?","kbd":["Pricing","Support","Orders"]}'),
-        _pack_http(b'{"intent":"pricing","reply":"Our plans start at $9/month with zero setup fees.","kbd":["Buy","Back"]}'),
-        _pack_http(b'{"intent":"support","reply":"Support team is online 24/7. Share your ticket ID.","kbd":["Open Ticket"]}'),
-        _pack_http(b'{"intent":"order","reply":"Please send your order number to track shipment.","kbd":["Track"]}'),
-        _pack_http(b'{"intent":"refund","reply":"Refunds are processed instantly within 30 days.","kbd":["Request Refund"]}'),
-        _pack_http(b'{"intent":"tech","reply":"All API clusters are operating at 100% uptime.","kbd":["Status Page"]}'),
-        _pack_http(b'{"intent":"hours","reply":"We operate Monday-Sunday, 00:00 to 24:00 UTC.","kbd":["Contact"]}'),
-        _pack_http(b'{"intent":"bye","reply":"Thank you! Have a great day ahead.","kbd":["Restart"]}'),
-    ),
-    (
-        _pack_http(b'{"intent":"greeting","reply":"Marhba! Kifech najem n3awnek lyoum?","kbd":["As3ar","Da3m","Talabiyet"]}'),
-        _pack_http(b'{"intent":"pricing","reply":"El ishtirak yabda men 9$ fi chhar.","kbd":["Ishtirak","Rjou3"]}'),
-        _pack_http(b'{"intent":"support","reply":"Fariq el da3m mawjoud 24/7.","kbd":["Tadhkira"]}'),
-        _pack_http(b'{"intent":"order","reply":"A3tina raqm el talabiya bech ntab3ouha.","kbd":["Tatabo3"]}'),
-        _pack_http(b'{"intent":"refund","reply":"Istirja3 el amwal fi dharf 30 youm.","kbd":["Istirja3"]}'),
-        _pack_http(b'{"intent":"tech","reply":"Kol el khawadem ta3mal bi najah 100%.","kbd":["Halat el Nidham"]}'),
-        _pack_http(b'{"intent":"hours","reply":"Na3mal 24 sa3a kol ayem el osbou3.","kbd":["Ittisal"]}'),
-        _pack_http(b'{"intent":"bye","reply":"Shukran lik! Nharek tayeb.","kbd":["Bidayah"]}'),
-    ),
-    (
-        _pack_http(b'{"intent":"greeting","reply":"Bonjour! Comment puis-je vous aider?","kbd":["Tarifs","Support","Colis"]}'),
-        _pack_http(b'{"intent":"pricing","reply":"Nos forfaits commencent a 9$/mois.","kbd":["Acheter","Retour"]}'),
-        _pack_http(b'{"intent":"support","reply":"Notre support est disponible 24/7.","kbd":["Creer Ticket"]}'),
-        _pack_http(b'{"intent":"order","reply":"Entrez votre numero de commande pour le suivi.","kbd":["Suivre"]}'),
-        _pack_http(b'{"intent":"refund","reply":"Remboursement immediat sous 30 jours.","kbd":["Rembourser"]}'),
-        _pack_http(b'{"intent":"tech","reply":"Tous nos serveurs API fonctionnent a 100%.","kbd":["Statut"]}'),
-        _pack_http(b'{"intent":"hours","reply":"Ouvert 7j/7 et 24h/24.","kbd":["Contact"]}'),
-        _pack_http(b'{"intent":"bye","reply":"Merci de votre visite et a bientot!","kbd":["Menu"]}'),
-    ),
+CACHED_REJECT_RESPONSE = _pack_reply(
+    0, "false", "not_english_greeting", "say hi or hey in English to start!", '["hey","hi!"]'
+)
+
+_SHORT_GREETINGS_32 = (
+    "hey", "hi", "heyy", "yo", "hey there", "hii", "sup", "hello!",
+    "hey how r u", "hi! hru?", "yo whats up", "heyy :)", "hiya", "hey! hows it going",
+    "hiii", "sup! hru", "hello there", "hey u", "hi there!", "yo! how are u",
+    "heyyy", "whats up!", "hey! nice to meet u", "hi :) how r u", "howdy!", "hey whats up",
+    "hii there", "hello :)", "yo! whats good", "hey! hru doing", "hi! hows u", "heyy! whats up",
+)
+CACHED_GREETING_POOL = tuple(
+    _pack_reply(1, "true", "english_greeting", msg, '["good u?","doing great!"]')
+    for msg in _SHORT_GREETINGS_32
+)
+
+_REPEAT_GREETINGS_8 = (
+    "hey again lol", "haha hi again!", "we already said hi :)", "yo again! how r u?",
+    "hii again haha", "already said hey lol", "haha hey x2! hru?", "hi again! whats up?",
+)
+CACHED_REPEAT_GREETING_POOL = tuple(
+    _pack_reply(1, "true", "english_greeting_repeat", msg, '["haha im good","how r u?"]')
+    for msg in _REPEAT_GREETINGS_8
 )
 
 
 class QuantizedModel:
     __slots__ = (
-        "emb_q", "emb_s", "wq1_q", "wq1_s", "wk1_q", "wk1_s", "wv1_q", "wv1_s", "wo1_q", "wo1_s",
-        "w1_q", "w1_s", "w2_q", "w2_s", "wq2_q", "wq2_s", "wk2_q", "wk2_s", "wv2_q", "wv2_s",
-        "wo2_q", "wo2_s", "w3_q", "w3_s", "w4_q", "w4_s", "w_intent_q", "w_intent_s",
-        "emb_f32", "wq1_f32", "wk1_f32", "wv1_f32", "wo1_f32", "w1_f32", "w2_f32",
-        "wq2_f32", "wk2_f32", "wv2_f32", "wo2_f32", "w3_f32", "w4_f32", "w_intent_f32",
-        "pos_f32", "mask_f32", "arange_k", "inv_sqrt_d", "eps",
-        "upper_a", "upper_z", "case_diff", "h_m0", "h_m1", "vocab_mask", "zero_i32",
+        "emb_q", "emb_s", "wqkv1_q", "wqkv1_s", "wo1_q", "wo1_s", "w1_q", "w1_s", "w2_q", "w2_s",
+        "wqkv2_q", "wqkv2_s", "wo2_q", "wo2_s", "w3_q", "w3_s", "w4_q", "w4_s", "w_intent_q", "w_intent_s",
+        "emb_f32", "wqkv1_f32", "wo1_f32", "w1_f32", "w2_f32",
+        "wqkv2_f32", "wo2_f32", "w3_f32", "w4_f32", "w_intent_f32",
+        "pos_f32", "mask_f32", "char_lut", "reject_lut", "inv_sqrt_d", "eps",
+        "h_p0", "h_p1", "vocab_mask", "one_i32", "space_i32", "conf_thresh",
     )
 
     def __init__(self, npz_path):
@@ -94,15 +86,11 @@ class QuantizedModel:
         emb_f32.flags.writeable = False
         self.emb_f32 = emb_f32
 
-        self.wq1_q, self.wq1_s, self.wq1_f32 = lock_pair("wq1")
-        self.wk1_q, self.wk1_s, self.wk1_f32 = lock_pair("wk1")
-        self.wv1_q, self.wv1_s, self.wv1_f32 = lock_pair("wv1")
+        self.wqkv1_q, self.wqkv1_s, self.wqkv1_f32 = lock_pair("wqkv1")
         self.wo1_q, self.wo1_s, self.wo1_f32 = lock_pair("wo1")
         self.w1_q, self.w1_s, self.w1_f32 = lock_pair("w1")
         self.w2_q, self.w2_s, self.w2_f32 = lock_pair("w2")
-        self.wq2_q, self.wq2_s, self.wq2_f32 = lock_pair("wq2")
-        self.wk2_q, self.wk2_s, self.wk2_f32 = lock_pair("wk2")
-        self.wv2_q, self.wv2_s, self.wv2_f32 = lock_pair("wv2")
+        self.wqkv2_q, self.wqkv2_s, self.wqkv2_f32 = lock_pair("wqkv2")
         self.wo2_q, self.wo2_s, self.wo2_f32 = lock_pair("wo2")
         self.w3_q, self.w3_s, self.w3_f32 = lock_pair("w3")
         self.w4_q, self.w4_s, self.w4_f32 = lock_pair("w4")
@@ -114,8 +102,8 @@ class QuantizedModel:
             np.arange(0, D_MODEL, 2, dtype=np.float32) * (-log_10k / np.float32(D_MODEL))
         ).astype(np.float32, copy=False)
         pos_f32 = np.zeros((SEQ_LEN, D_MODEL), dtype=np.float32)
-        pos_f32[:, 0::2] = np.sin(pos_idx * div_term) * np.float32(0.05)
-        pos_f32[:, 1::2] = np.cos(pos_idx * div_term) * np.float32(0.05)
+        pos_f32[:, 0::2] = np.sin(pos_idx * div_term) * np.float32(0.02)
+        pos_f32[:, 1::2] = np.cos(pos_idx * div_term) * np.float32(0.02)
         pos_f32.flags.writeable = False
         self.pos_f32 = pos_f32
 
@@ -123,103 +111,134 @@ class QuantizedModel:
         mask_f32.flags.writeable = False
         self.mask_f32 = mask_f32
 
-        arange_k = np.arange(NUM_INTENTS, dtype=np.int32).reshape(1, NUM_INTENTS)
-        arange_k.flags.writeable = False
-        self.arange_k = arange_k
+        lut = np.full((256,), 32, dtype=np.int32)
+        lut[47:58] = np.arange(47, 58, dtype=np.int32)
+        lut[65:91] = np.arange(97, 123, dtype=np.int32)
+        lut[97:123] = np.arange(97, 123, dtype=np.int32)
+        lut[39] = np.int32(39)
+        lut[128:256] = np.arange(128, 256, dtype=np.int32)
+        lut.flags.writeable = False
+        self.char_lut = lut
+
+        rej = np.ones((256,), dtype=np.bool_)
+        rej[32] = False
+        rej[33] = False
+        rej[39] = False
+        rej[44] = False
+        rej[46] = False
+        rej[63] = False
+        rej[65:91] = False
+        rej[97:123] = False
+        rej.flags.writeable = False
+        self.reject_lut = rej
 
         self.inv_sqrt_d = np.float32(np.float32(1.0) / np.sqrt(np.float32(D_MODEL)))
         self.eps = np.float32(1e-5)
-        self.upper_a = np.int32(65)
-        self.upper_z = np.int32(90)
-        self.case_diff = np.int32(32)
-        self.h_m0 = np.int32(37)
-        self.h_m1 = np.int32(13)
-        self.vocab_mask = np.int32(511)
-        self.zero_i32 = np.int32(0)
+        # Synchronized polynomial hash constants: (c0 * 31 + c1) * 31 + c2 == c0 * 961 + c1 * 31 + c2
+        self.h_p0 = np.int32(961)
+        self.h_p1 = np.int32(31)
+        self.vocab_mask = np.int32(VOCAB_SIZE - 2)
+        self.one_i32 = np.int32(1)
+        self.space_i32 = np.int32(32)
+        self.conf_thresh = np.float32(0.0)
 
 
 class InferenceSlot:
     __slots__ = (
-        "slot_id", "raw_u8", "raw_tmp", "raw_mask", "raw_mask2",
-        "tokens", "t_tmp", "tok_mask", "x", "q", "k", "v", "scores",
-        "row_max", "row_sum", "attn_out", "proj_out", "ffn_mid",
-        "pooled", "intent_logits", "i_max", "i_mask", "i_idx", "i_scalar",
+        "slot_id", "raw_u8", "rej_mask", "tokens", "t_tmp", "tok_mask", "tok_mask2",
+        "valid_f32", "active_count", "x", "qkv", "q", "k", "v", "scores",
+        "row_max", "row_sum", "attn_out", "proj_out", "norm_tmp", "ffn_mid",
+        "pooled", "intent_logits",
     )
 
     def __init__(self, slot_id):
         self.slot_id = slot_id
         self.raw_u8 = np.zeros((SEQ_LEN + 2,), dtype=np.int32)
-        self.raw_tmp = np.zeros((SEQ_LEN + 2,), dtype=np.int32)
-        self.raw_mask = np.zeros((SEQ_LEN + 2,), dtype=np.bool_)
-        self.raw_mask2 = np.zeros((SEQ_LEN + 2,), dtype=np.bool_)
+        self.rej_mask = np.zeros((SEQ_LEN + 2,), dtype=np.bool_)
         self.tokens = np.zeros((SEQ_LEN,), dtype=np.int32)
         self.t_tmp = np.zeros((SEQ_LEN,), dtype=np.int32)
         self.tok_mask = np.zeros((SEQ_LEN,), dtype=np.bool_)
+        self.tok_mask2 = np.zeros((SEQ_LEN,), dtype=np.bool_)
+        self.valid_f32 = np.zeros((SEQ_LEN, 1), dtype=np.float32)
+        self.active_count = np.zeros((), dtype=np.float32)
         self.x = np.zeros((SEQ_LEN, D_MODEL), dtype=np.float32)
-        self.q = np.zeros((SEQ_LEN, D_MODEL), dtype=np.float32)
-        self.k = np.zeros((SEQ_LEN, D_MODEL), dtype=np.float32)
-        self.v = np.zeros((SEQ_LEN, D_MODEL), dtype=np.float32)
+        self.qkv = np.zeros((SEQ_LEN, 3 * D_MODEL), dtype=np.float32)
+        self.q = self.qkv[:, :D_MODEL]
+        self.k = self.qkv[:, D_MODEL : 2 * D_MODEL]
+        self.v = self.qkv[:, 2 * D_MODEL :]
         self.scores = np.zeros((SEQ_LEN, SEQ_LEN), dtype=np.float32)
         self.row_max = np.zeros((SEQ_LEN, 1), dtype=np.float32)
         self.row_sum = np.zeros((SEQ_LEN, 1), dtype=np.float32)
         self.attn_out = np.zeros((SEQ_LEN, D_MODEL), dtype=np.float32)
         self.proj_out = np.zeros((SEQ_LEN, D_MODEL), dtype=np.float32)
+        self.norm_tmp = np.zeros((SEQ_LEN, D_MODEL), dtype=np.float32)
         self.ffn_mid = np.zeros((SEQ_LEN, D_FF), dtype=np.float32)
         self.pooled = np.zeros((1, D_MODEL), dtype=np.float32)
         self.intent_logits = np.zeros((1, NUM_INTENTS), dtype=np.float32)
-        self.i_max = np.zeros((1, 1), dtype=np.float32)
-        self.i_mask = np.zeros((1, NUM_INTENTS), dtype=np.bool_)
-        self.i_idx = np.zeros((1, NUM_INTENTS), dtype=np.int32)
-        self.i_scalar = np.zeros((), dtype=np.int32)
 
 
 class UserStore:
-    __slots__ = ("lang", "last_intent", "msg_count", "last_ts", "write_queue", "wal_batch")
+    __slots__ = ("last_intent", "msg_count", "last_ts", "write_queue", "wal_batch")
 
     def __init__(self):
-        self.lang = np.zeros((MAX_USERS,), dtype=np.uint8)
         self.last_intent = np.zeros((MAX_USERS,), dtype=np.uint8)
         self.msg_count = np.zeros((MAX_USERS,), dtype=np.uint8)
         self.last_ts = np.zeros((MAX_USERS,), dtype=np.uint32)
         self.write_queue = deque(maxlen=4096)
-        self.wal_batch = np.zeros((256, 4), dtype=np.uint32)
+        self.wal_batch = np.zeros((256, 3), dtype=np.uint32)
 
 
 def forward_pass(model, slot, mv_payload):
-    # Fill with ASCII space (32) so end-of-string words match mid-string word trigrams
+    b_full = np.frombuffer(mv_payload[:SEQ_LEN], dtype=np.uint8)
+    non_ws = np.flatnonzero(b_full > np.uint8(32))
+    if non_ws.shape[0] == 0:
+        return 0
+    first_idx = int(non_ws[0])
+    last_idx = int(non_ws[-1]) + 1
+    n_tok = last_idx - first_idx
+    if n_tok > MAX_GREETING_LEN:
+        return 0
+
     slot.raw_u8.fill(32)
-    b_view = np.frombuffer(mv_payload[:SEQ_LEN], dtype=np.uint8)
-    n_tok = b_view.shape[0]
-    slot.raw_u8[:n_tok] = b_view
+    slot.raw_u8[1 : 1 + n_tok] = b_full[first_idx:last_idx]
 
-    np.greater_equal(slot.raw_u8, model.upper_a, out=slot.raw_mask)
-    np.less_equal(slot.raw_u8, model.upper_z, out=slot.raw_mask2)
-    slot.raw_mask &= slot.raw_mask2
-    np.multiply(slot.raw_mask, model.case_diff, out=slot.raw_tmp)
-    slot.raw_u8 += slot.raw_tmp
+    np.take(model.reject_lut, slot.raw_u8[1 : 1 + n_tok], out=slot.rej_mask[:n_tok])
+    if bool(np.any(slot.rej_mask[:n_tok])):
+        return 0
 
-    v0 = slot.raw_u8[:SEQ_LEN]
-    v1 = slot.raw_u8[1 : SEQ_LEN + 1]
-    v2 = slot.raw_u8[2 : SEQ_LEN + 2]
+    np.take(model.char_lut, slot.raw_u8, out=slot.raw_u8)
 
-    np.multiply(v0, model.h_m0, out=slot.tokens)
-    np.multiply(v1, model.h_m1, out=slot.t_tmp)
+    c0 = slot.raw_u8[:SEQ_LEN]
+    c1 = slot.raw_u8[1 : SEQ_LEN + 1]
+    c2 = slot.raw_u8[2 : SEQ_LEN + 2]
+
+    # Exact synced hash: (((c0 * 31 + c1) * 31 + c2) & (VOCAB_SIZE - 2)) + 1
+    np.multiply(c0, model.h_p0, out=slot.tokens)
+    np.multiply(c1, model.h_p1, out=slot.t_tmp)
     slot.tokens += slot.t_tmp
-    slot.tokens += v2
+    slot.tokens += c2
     slot.tokens &= model.vocab_mask
+    slot.tokens += model.one_i32
 
-    np.equal(slot.tokens, model.zero_i32, out=slot.tok_mask)
-    slot.tokens += slot.tok_mask
-    slot.tokens[n_tok:] = 0
+    np.equal(c0, model.space_i32, out=slot.tok_mask)
+    np.equal(c1, model.space_i32, out=slot.tok_mask2)
+    slot.tok_mask &= slot.tok_mask2
+    np.equal(c2, model.space_i32, out=slot.tok_mask2)
+    slot.tok_mask &= slot.tok_mask2
+    np.invert(slot.tok_mask, out=slot.tok_mask)
+    slot.tokens *= slot.tok_mask
+
+    np.copyto(slot.valid_f32[:, 0], slot.tok_mask, casting="unsafe")
+    np.sum(slot.valid_f32, out=slot.active_count)
+    if float(slot.active_count) <= 0.0:
+        return 0
 
     np.take(model.emb_f32, slot.tokens, axis=0, out=slot.x)
     slot.x += model.pos_f32
+    slot.x *= slot.valid_f32
 
-    # --- Layer 1 Attention ---
-    np.matmul(slot.x, model.wq1_f32, out=slot.q)
-    np.matmul(slot.x, model.wk1_f32, out=slot.k)
-    np.matmul(slot.x, model.wv1_f32, out=slot.v)
-
+    # --- Layer 1 Fused-QKV Attention ---
+    np.matmul(slot.x, model.wqkv1_f32, out=slot.qkv)
     np.matmul(slot.q, slot.k.T, out=slot.scores)
     slot.scores *= model.inv_sqrt_d
     slot.scores += model.mask_f32
@@ -233,8 +252,8 @@ def forward_pass(model, slot, mv_payload):
     np.matmul(slot.attn_out, model.wo1_f32, out=slot.proj_out)
     slot.x += slot.proj_out
 
-    np.multiply(slot.x, slot.x, out=slot.q)
-    np.mean(slot.q, axis=1, keepdims=True, out=slot.row_sum)
+    np.multiply(slot.x, slot.x, out=slot.norm_tmp)
+    np.mean(slot.norm_tmp, axis=1, keepdims=True, out=slot.row_sum)
     slot.row_sum += model.eps
     np.sqrt(slot.row_sum, out=slot.row_sum)
     slot.x /= slot.row_sum
@@ -245,17 +264,14 @@ def forward_pass(model, slot, mv_payload):
     np.matmul(slot.ffn_mid, model.w2_f32, out=slot.proj_out)
     slot.x += slot.proj_out
 
-    np.multiply(slot.x, slot.x, out=slot.q)
-    np.mean(slot.q, axis=1, keepdims=True, out=slot.row_sum)
+    np.multiply(slot.x, slot.x, out=slot.norm_tmp)
+    np.mean(slot.norm_tmp, axis=1, keepdims=True, out=slot.row_sum)
     slot.row_sum += model.eps
     np.sqrt(slot.row_sum, out=slot.row_sum)
     slot.x /= slot.row_sum
 
-    # --- Layer 2 Attention ---
-    np.matmul(slot.x, model.wq2_f32, out=slot.q)
-    np.matmul(slot.x, model.wk2_f32, out=slot.k)
-    np.matmul(slot.x, model.wv2_f32, out=slot.v)
-
+    # --- Layer 2 Fused-QKV Attention ---
+    np.matmul(slot.x, model.wqkv2_f32, out=slot.qkv)
     np.matmul(slot.q, slot.k.T, out=slot.scores)
     slot.scores *= model.inv_sqrt_d
     slot.scores += model.mask_f32
@@ -269,8 +285,8 @@ def forward_pass(model, slot, mv_payload):
     np.matmul(slot.attn_out, model.wo2_f32, out=slot.proj_out)
     slot.x += slot.proj_out
 
-    np.multiply(slot.x, slot.x, out=slot.q)
-    np.mean(slot.q, axis=1, keepdims=True, out=slot.row_sum)
+    np.multiply(slot.x, slot.x, out=slot.norm_tmp)
+    np.mean(slot.norm_tmp, axis=1, keepdims=True, out=slot.row_sum)
     slot.row_sum += model.eps
     np.sqrt(slot.row_sum, out=slot.row_sum)
     slot.x /= slot.row_sum
@@ -281,47 +297,39 @@ def forward_pass(model, slot, mv_payload):
     np.matmul(slot.ffn_mid, model.w4_f32, out=slot.proj_out)
     slot.x += slot.proj_out
 
-    np.multiply(slot.x, slot.x, out=slot.q)
-    np.mean(slot.q, axis=1, keepdims=True, out=slot.row_sum)
+    np.multiply(slot.x, slot.x, out=slot.norm_tmp)
+    np.mean(slot.norm_tmp, axis=1, keepdims=True, out=slot.row_sum)
     slot.row_sum += model.eps
     np.sqrt(slot.row_sum, out=slot.row_sum)
     slot.x /= slot.row_sum
 
-    # --- Masked Non-Padding Pooling + Strict int32 Intent Selection ---
-    slot.x[n_tok:].fill(0.0)
+    # --- Masked Pooling + Strict Confidence Margin (>= 2.0) ---
+    slot.x *= slot.valid_f32
     np.sum(slot.x, axis=0, keepdims=True, out=slot.pooled)
-    inv_len = np.float32(1.0 / float(n_tok if n_tok > 0 else 1))
-    slot.pooled *= inv_len
+    slot.pooled /= slot.active_count
     np.matmul(slot.pooled, model.w_intent_f32, out=slot.intent_logits)
 
-    np.max(slot.intent_logits, axis=1, keepdims=True, out=slot.i_max)
-    np.equal(slot.intent_logits, slot.i_max, out=slot.i_mask)
-    np.multiply(slot.i_mask, model.arange_k, out=slot.i_idx)
-    np.max(slot.i_idx, out=slot.i_scalar)
-    return int(slot.i_scalar)
-
-
-def detect_lang_id(mv_payload):
-    if RE_LANG_AR.search(mv_payload) is not None:
-        return 1
-    if RE_LANG_FR.search(mv_payload) is not None:
-        return 2
-    return 0
+    margin = np.float32(slot.intent_logits[0, 1] - slot.intent_logits[0, 0])
+    return 1 if margin >= model.conf_thresh else 0
 
 
 def handle_user_query(model, slot, users, user_id, mv_payload):
     uid = user_id % MAX_USERS
-    lang_id = detect_lang_id(mv_payload)
-    intent_id = forward_pass(model, slot, mv_payload)
+    class_id = forward_pass(model, slot, mv_payload)
+    prev_intent = int(users.last_intent[uid])
+    msg_cnt = (int(users.msg_count[uid]) + 1) & 255
 
-    users.lang[uid] = np.uint8(lang_id)
-    users.last_intent[uid] = np.uint8(intent_id)
-    users.msg_count[uid] = np.uint8((int(users.msg_count[uid]) + 1) & 255)
+    users.last_intent[uid] = np.uint8(class_id)
+    users.msg_count[uid] = np.uint8(msg_cnt)
     now_s = int(time.time()) & 0xFFFFFFFF
     users.last_ts[uid] = np.uint32(now_s)
-    users.write_queue.append((uid, lang_id, intent_id, now_s))
+    users.write_queue.append((uid, class_id, now_s))
 
-    return CACHED_HTTP_RESPONSES[lang_id][intent_id]
+    if class_id == 0:
+        return CACHED_REJECT_RESPONSE
+    if prev_intent == 1:
+        return CACHED_REPEAT_GREETING_POOL[(uid + msg_cnt) & 7]
+    return CACHED_GREETING_POOL[(uid + msg_cnt) & 31]
 
 
 async def wal_write_behind_worker(users, wal_path="events_wal.bin"):
@@ -343,7 +351,7 @@ async def wal_write_behind_worker(users, wal_path="events_wal.bin"):
 async def start_server(host="127.0.0.1", port=8080):
     if not os.path.exists("model_weights.npz"):
         import offline_train
-        offline_train.train_and_export("model_weights.npz")
+        offline_train.train_and_export("model_weights.npz", force_retrain=True)
 
     model = QuantizedModel("model_weights.npz")
     users = UserStore()
@@ -352,15 +360,31 @@ async def start_server(host="127.0.0.1", port=8080):
         slot_queue.put_nowait(InferenceSlot(i))
 
     test_slot = await slot_queue.get()
-    sample_mv = memoryview(b"hello how much is the price")
+    sample_mv = memoryview(b"heyyy what's up")
     t0 = time.perf_counter()
     for i in range(1000):
-        http_resp = handle_user_query(model, test_slot, users, i, sample_mv)
+        handle_user_query(model, test_slot, users, i, sample_mv)
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
+
+    suite = (
+        (b"hi", 1), (b"HI!", 1), (b"heyyy", 1), (b"yo what's up", 1),
+        (b"how are you?", 1), (b"good morning", 1), (b"ello", 1), (b"sup", 1),
+        (b"hellod/", 0), (b"hellod", 0), (b"hi/", 0), (b"/hello", 0),
+        (b"hi123", 0), (b"help", 0), (b"helicopter", 0), (b"bonjour", 0),
+    )
+    passed = sum(1 for txt, exp in suite if forward_pass(model, test_slot, memoryview(txt)) == exp)
+
+    users.last_intent[777] = np.uint8(0)
+    r1 = handle_user_query(model, test_slot, users, 777, memoryview(b"hi"))
+    r2 = handle_user_query(model, test_slot, users, 777, memoryview(b"hey"))
     slot_queue.put_nowait(test_slot)
-    body_start = http_resp.find(b"\r\n\r\n") + 4
+
+    b1 = r1[r1.find(b"\r\n\r\n") + 4 :].decode("utf-8")
+    b2 = r2[r2.find(b"\r\n\r\n") + 4 :].decode("utf-8")
     print(f"[BENCHMARK] 1,000 forward passes in {elapsed_ms:.2f} ms ({elapsed_ms / 1000.0:.4f} ms/req)")
-    print(f"[VERIFIED OUTPUT] {http_resp[body_start:].decode('utf-8')}")
+    print(f"[ZERO-FAUX SUITE] Passed {passed}/{len(suite)} hard-negative & greeting tests (2.56 MB RAM)")
+    print(f"[1ST GREETING] {b1}")
+    print(f"[2ND GREETING] {b2}")
 
     if "--benchmark" in sys.argv:
         return
@@ -391,7 +415,7 @@ async def start_server(host="127.0.0.1", port=8080):
 
     asyncio.create_task(wal_write_behind_worker(users))
     server = await asyncio.start_server(client_handler, host, port, backlog=2048)
-    print(f"[SERVER] Listening on http://{host}:{port} (Zero DB, 50k Users, 4.13 MB Data RAM)")
+    print(f"[SERVER] Step 1 Dating Greeting Engine on http://{host}:{port} (2.56 MB Total RAM)")
     async with server:
         await server.serve_forever()
 

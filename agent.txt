@@ -55,3 +55,97 @@ pyarmor gen -O dist production_server.py
 cp model_weights.npz dist/
 python dist/production_server.py
 Code
+**********
+!pip install -q datasets
+!python offline_train.py
+******
+from google.colab import files
+files.download("model_weights.npz")
+
+
+import os
+os.environ["HF_TOKEN"] = "hf_your_token_here"
+
+!python offline_train.py
+
+
+***************
+
+!pip install -q datasets
+!python offline_train.py
+
+from google.colab import files
+files.download("model_weights.npz")
+
+*****************
+
+import re
+
+with open("offline_train.py", "r", encoding="utf-8") as f:
+    code = f.read()
+
+# Inject live timer + 1024 batch size + 15 epochs + chunked evaluation
+pattern = re.compile(
+    r"    n_total = x_np\.shape\[0\].*?logits_np = .*?\.astype\(np\.float32\)",
+    re.DOTALL,
+)
+
+timed_block = """    import time
+    n_total = x_np.shape[0]
+    batch_size = 1024
+    total_epochs = 15
+    t_start = time.perf_counter()
+    for epoch in range(total_epochs):
+        perm = np.random.permutation(n_total).astype(np.int32)
+        for start in range(0, n_total, batch_size):
+            idx = perm[start : start + batch_size]
+            opt.zero_grad()
+            with torch.no_grad():
+                params[0].data[0].zero_()
+            logits_i = forward_torch(x_t[idx], valid_m[idx], valid_counts[idx])
+            loss = -torch.sum(yi_oh[idx] * F.log_softmax(logits_i, dim=-1), dim=-1).mean()
+            loss.backward()
+            opt.step()
+        elapsed = time.perf_counter() - t_start
+        eta = (elapsed / (epoch + 1)) * (total_epochs - (epoch + 1))
+        print(
+            f"[EPOCH {epoch + 1:02d}/{total_epochs}] Loss: {loss.item():.4f} | "
+            f"Elapsed: {elapsed:.1f}s | Finish in: {eta:.1f}s",
+            flush=True,
+        )
+
+    with torch.no_grad():
+        params[0].data[0].zero_()
+        chunks = [
+            forward_torch(x_t[s : s + 1024], valid_m[s : s + 1024], valid_counts[s : s + 1024])
+            .cpu().numpy().astype(np.float32)
+            for s in range(0, n_total, 1024)
+        ]
+        logits_np = np.concatenate(chunks, axis=0)"""
+
+assert pattern.search(code), "Could not locate training block in offline_train.py"
+code = pattern.sub(timed_block, code, count=1)
+
+with open("offline_train.py", "w", encoding="utf-8") as f:
+    f.write(code)
+
+!python -u offline_train.py
+
+from google.colab import files
+files.download("model_weights.npz")
+
+
+
+************
+from google.colab import drive
+drive.mount("/content/drive")
+
+import importlib
+import offline_train
+importlib.reload(offline_train)
+
+drive_weights = "/content/drive/MyDrive/model_weights.npz"
+offline_train.train_and_export(output_path=drive_weights, force_retrain=True)
+
+from google.colab import files
+files.download(drive_weights)
