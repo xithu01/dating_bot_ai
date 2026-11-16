@@ -149,3 +149,10 @@ offline_train.train_and_export(output_path=drive_weights, force_retrain=True)
 
 from google.colab import files
 files.download(drive_weights)
+
+
+***********
+
+!python build_greetings_txt.py
+!python offline_train.py --force
+!python production_server.py --benchmark

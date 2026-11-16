@@ -1,61 +1,43 @@
 # FILE: extract_jsonl_greetings.py
-# PURPOSE: Stream bot_chat_history.jsonl, extract clean English greetings, and append unique ones to greetings.txt
+# PURPOSE: Extract 100% clean Class 1 greetings & Class 0 non-greetings from bot_chat_history.jsonl
+# PYARMOR COMPATIBLE: < 120 lines, < 5 KB
 
 import json
 import os
 import re
-
-# Matches pure English chat greetings including real chat typos seen in your logs (hlo, hy, hie, hei, hiyaa, wassuppp)
-GREETING_PATTERN = re.compile(
-    r"^(?:"
-    r"h+i+|h+e+y+|h+e+l+o+|h+l+o+|h+y+|h+i+e+|h+e+i+|h+i+y+a+|h+e+y+a+|h+u+l+o+|e+l+o+|"
-    r"y+o+|s+u+p+|w+a+s+u+p+|w+h+a+t+s\s+u+p+|w+h+a+t\s+is\s+u+p+|h+o+w+d+y+|"
-    r"g+r+e+e+t+i+n+g+s*|s+a+l+u+t+a+t+i+o+n+s*|w+e+l+c+o+m+e+|a+l+o+h+a+|g\s*d+a+y+|"
-    r"g+o+o+d\s+(?:m+o+r+n+i+n+g*|a+f+t+e+r+n+o+o+n+|e+v+e+n+i+n+g*|d+a+y+)|"
-    r"m+o+r+n+i+n+g*|a+f+t+e+r+n+o+o+n+|e+v+e+n+i+n+g+|"
-    r"h+o+w\s+(?:a+r+e|r)\s+(?:y+o+u|u|y+a)(?:\s+d+o+i+n+g*)?|h+r+u+|h+y+d+|"
-    r"h+o+w+s\s+(?:i+t\s+g+o+i+n+g*|e+v+e+r+y+t+h+i+n+g*|u+r\s+d+a+y+)|"
-    r"n+i+c+e\s+t+o\s+m+e+e+t\s+(?:y+o+u|u)|l+o+n+g\s+t+i+m+e\s+n+o\s+s+e+e+"
-    r")(?:[\s!?.:,;)(\-]+(?:t+h+e+r+e+|y+o+u|u|b+r+o+|m+a+n+|m+a+t+e+|f+r+i+e+n+d+|s+t+r+a+n+g+e+r+|h+a+h+a+|l+o+l+))?[\s!?.:;)(]*$",
-    re.IGNORECASE,
-)
+from build_greetings_txt import is_valid_clean_greeting
 
 REPEAT_CHAR_RE = re.compile(r"(.)\1{3,}")
 SPACE_RE = re.compile(r"\s+")
 
 
-def clean_greeting(raw_text):
-    if not isinstance(raw_text, str):
-        return ""
-    text = raw_text.strip()
-    if not text or text.startswith("[") or len(text) > 30:
-        return ""
-    try:
-        text.encode("ascii")
-    except UnicodeEncodeError:
-        return ""
+def process_jsonl_logs(
+    jsonl_path="bot_chat_history.jsonl",
+    pos_path="greetings.txt",
+    neg_path="negatives.txt",
+):
+    if not os.path.exists(jsonl_path):
+        print(f"[SKIP] '{jsonl_path}' not found.")
+        return
 
-    # Normalize extreme letter spam (e.g., "hiiiiiii" -> "hiii")
-    normalized = REPEAT_CHAR_RE.sub(r"\1\1\1", text.lower())
-    normalized = SPACE_RE.sub(" ", normalized).strip()
-
-    if len(normalized) > 25 or len(normalized.split()) > 4:
-        return ""
-    if GREETING_PATTERN.match(normalized):
-        return normalized
-    return ""
-
-
-def append_from_jsonl(jsonl_path="bot_chat_history.jsonl", txt_path="greetings.txt"):
-    existing = set()
-    if os.path.exists(txt_path):
-        with open(txt_path, "r", encoding="ascii", errors="ignore") as f:
+    existing_pos = set()
+    if os.path.exists(pos_path):
+        with open(pos_path, "r", encoding="ascii", errors="ignore") as f:
             for line in f:
                 s = line.strip().lower()
                 if s:
-                    existing.add(s)
+                    existing_pos.add(s)
 
-    new_greetings = set()
+    existing_neg = set()
+    if os.path.exists(neg_path):
+        with open(neg_path, "r", encoding="ascii", errors="ignore") as f:
+            for line in f:
+                s = line.strip().lower()
+                if s:
+                    existing_neg.add(s)
+
+    new_pos = set()
+    new_neg = set()
     total_rows = 0
 
     with open(jsonl_path, "r", encoding="utf-8", errors="ignore") as jf:
@@ -68,31 +50,43 @@ def append_from_jsonl(jsonl_path="bot_chat_history.jsonl", txt_path="greetings.t
                 record = json.loads(line)
             except json.JSONDecodeError:
                 continue
-
             if record.get("sender") == "system":
                 continue
 
-            cleaned = clean_greeting(record.get("text", ""))
-            if cleaned and cleaned not in existing:
-                new_greetings.add(cleaned)
+            raw_text = record.get("text", "")
+            if not isinstance(raw_text, str):
+                continue
+            text = raw_text.strip()
+            if not text or text.startswith("[") or len(text) > 60 or not text.isascii():
+                continue
 
-    if new_greetings:
-        needs_newline = False
-        if os.path.exists(txt_path) and os.path.getsize(txt_path) > 0:
-            with open(txt_path, "rb") as check_f:
-                check_f.seek(-1, os.SEEK_END)
-                needs_newline = check_f.read(1) != b"\n"
+            norm = SPACE_RE.sub(" ", REPEAT_CHAR_RE.sub(r"\1\1\1", text.lower())).strip()
+            if not norm:
+                continue
 
-        with open(txt_path, "a", encoding="ascii") as out_f:
-            if needs_newline:
-                out_f.write("\n")
-            for item in sorted(new_greetings):
-                out_f.write(item + "\n")
+            clean_pos = is_valid_clean_greeting(norm)
+            if clean_pos:
+                if clean_pos not in existing_pos:
+                    new_pos.add(clean_pos)
+            else:
+                if norm not in existing_pos and norm not in existing_neg:
+                    if len(existing_neg) + len(new_neg) < 15000:
+                        new_neg.add(norm)
 
-    print(f"[SCAN] Read {total_rows} lines from '{jsonl_path}'")
-    print(f"[ADDED] Appended {len(new_greetings)} new unique greetings to '{txt_path}'")
-    print(f"[TOTAL] '{txt_path}' now has {len(existing) + len(new_greetings)} total unique greetings")
+    if new_pos:
+        with open(pos_path, "a", encoding="ascii") as out_p:
+            for item in sorted(new_pos):
+                out_p.write(item + "\n")
+
+    if new_neg:
+        with open(neg_path, "a", encoding="ascii") as out_n:
+            for item in sorted(new_neg):
+                out_n.write(item + "\n")
+
+    print(f"[SCAN] Processed {total_rows} JSONL rows from '{jsonl_path}'")
+    print(f"[CLASS 1] Added {len(new_pos)} pure greetings -> '{pos_path}' ({len(existing_pos) + len(new_pos)} total)")
+    print(f"[CLASS 0] Added {len(new_neg)} non-greetings -> '{neg_path}' ({len(existing_neg) + len(new_neg)} total)")
 
 
 if __name__ == "__main__":
-    append_from_jsonl()
+    process_jsonl_logs()

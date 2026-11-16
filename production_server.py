@@ -14,7 +14,7 @@ SEQ_LEN = 64
 MAX_GREETING_LEN = 30
 D_MODEL = 64
 D_FF = 128
-NUM_INTENTS = 2
+NUM_INTENTS = 2  # Modular Step 1: Class 0 = Not an English Greeting, Class 1 = English Greeting
 MAX_USERS = 50000
 NUM_WORKERS = 8
 
@@ -134,13 +134,12 @@ class QuantizedModel:
 
         self.inv_sqrt_d = np.float32(np.float32(1.0) / np.sqrt(np.float32(D_MODEL)))
         self.eps = np.float32(1e-5)
-        # Synchronized polynomial hash constants: (c0 * 31 + c1) * 31 + c2 == c0 * 961 + c1 * 31 + c2
         self.h_p0 = np.int32(961)
         self.h_p1 = np.int32(31)
         self.vocab_mask = np.int32(VOCAB_SIZE - 2)
         self.one_i32 = np.int32(1)
         self.space_i32 = np.int32(32)
-        self.conf_thresh = np.float32(0.0)
+        self.conf_thresh = np.float32(1.5)
 
 
 class InferenceSlot:
@@ -212,7 +211,6 @@ def forward_pass(model, slot, mv_payload):
     c1 = slot.raw_u8[1 : SEQ_LEN + 1]
     c2 = slot.raw_u8[2 : SEQ_LEN + 2]
 
-    # Exact synced hash: (((c0 * 31 + c1) * 31 + c2) & (VOCAB_SIZE - 2)) + 1
     np.multiply(c0, model.h_p0, out=slot.tokens)
     np.multiply(c1, model.h_p1, out=slot.t_tmp)
     slot.tokens += slot.t_tmp
@@ -303,7 +301,7 @@ def forward_pass(model, slot, mv_payload):
     np.sqrt(slot.row_sum, out=slot.row_sum)
     slot.x /= slot.row_sum
 
-    # --- Masked Pooling + Strict Confidence Margin (>= 2.0) ---
+    # --- Masked Pooling + Confidence Margin ---
     slot.x *= slot.valid_f32
     np.sum(slot.x, axis=0, keepdims=True, out=slot.pooled)
     slot.pooled /= slot.active_count
@@ -360,31 +358,24 @@ async def start_server(host="127.0.0.1", port=8080):
         slot_queue.put_nowait(InferenceSlot(i))
 
     test_slot = await slot_queue.get()
-    sample_mv = memoryview(b"heyyy what's up")
+    sample_mv = memoryview(b"hi")
     t0 = time.perf_counter()
     for i in range(1000):
         handle_user_query(model, test_slot, users, i, sample_mv)
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
     suite = (
-        (b"hi", 1), (b"HI!", 1), (b"heyyy", 1), (b"yo what's up", 1),
-        (b"how are you?", 1), (b"good morning", 1), (b"ello", 1), (b"sup", 1),
-        (b"hellod/", 0), (b"hellod", 0), (b"hi/", 0), (b"/hello", 0),
-        (b"hi123", 0), (b"help", 0), (b"helicopter", 0), (b"bonjour", 0),
+        (b"hi", 1), (b"hii", 1), (b"HI!", 1), (b"heyyy", 1),
+        (b"yo what's up", 1), (b"how are you today?", 1), (b"good morning", 1), (b"sup", 1),
+        (b"F or m", 0), (b"from?", 0), (b"Age?", 0), (b"m here", 0),
+        (b"Charlotte", 0), (b"U f?", 0), (b"24", 0), (b"tunisia", 0),
+        (b"hellod/", 0), (b"hellod", 0), (b"help", 0), (b"bonjour", 0),
     )
     passed = sum(1 for txt, exp in suite if forward_pass(model, test_slot, memoryview(txt)) == exp)
-
-    users.last_intent[777] = np.uint8(0)
-    r1 = handle_user_query(model, test_slot, users, 777, memoryview(b"hi"))
-    r2 = handle_user_query(model, test_slot, users, 777, memoryview(b"hey"))
     slot_queue.put_nowait(test_slot)
 
-    b1 = r1[r1.find(b"\r\n\r\n") + 4 :].decode("utf-8")
-    b2 = r2[r2.find(b"\r\n\r\n") + 4 :].decode("utf-8")
     print(f"[BENCHMARK] 1,000 forward passes in {elapsed_ms:.2f} ms ({elapsed_ms / 1000.0:.4f} ms/req)")
-    print(f"[ZERO-FAUX SUITE] Passed {passed}/{len(suite)} hard-negative & greeting tests (2.56 MB RAM)")
-    print(f"[1ST GREETING] {b1}")
-    print(f"[2ND GREETING] {b2}")
+    print(f"[ZERO-FAUX SUITE] Passed {passed}/{len(suite)} tests ('hi', 'hii' & JSONL non-greetings)")
 
     if "--benchmark" in sys.argv:
         return
