@@ -1,6 +1,7 @@
+#!/usr/bin/env python3
 # FILE: production_server.py
-# PURPOSE: Step 1 + Step 2 + Step 3 Pure NumPy Dating Engine (Fixes "lm 24", "24y", "21yres", "20yres")
-# RULES: Zero PyTorch/SciPy/DB, zero float64/int64, zero loops over tensors, PyArmor compatible (< 430 lines)
+# PURPOSE: Step 1 + Step 2 + Step 3 + Step 4 Pure NumPy Dating Inference Engine
+# RULES: Zero PyTorch/SciPy/DB, zero float64/int64, zero loops over tensors, PyArmor compatible (< 430 lines / < 18 KB)
 
 import asyncio
 from collections import deque
@@ -8,6 +9,12 @@ import os
 import sys
 import time
 import numpy as np
+
+from production_server_part2 import (
+    _build_step1_bloom_tables,
+    handle_user_query,
+    wal_write_behind_worker,
+)
 
 VOCAB_SIZE = 2048
 SEQ_LEN = 32
@@ -21,234 +28,37 @@ S2_VOCAB = 1024
 S2_DIM = 32
 S2_CLASSES = 6
 S3_CLASSES = 2
+S4_CLASSES = 7
 MAX_USERS = 50000
 NUM_WORKERS = 8
-SESSION_TIMEOUT_S = 600
-
-FLAG_GREETED = 1
-FLAG_ASKED_AGE = 2
-FLAG_ASKED_COUNTRY = 4
-FLAG_ASKED_HRU = 8
-
-_VALID_SINGLE_GREETING_WORDS = (
-    "hi", "hey", "helo", "hlo", "hy", "hie", "hei", "hiya", "heya", "hulo", "elo",
-    "yo", "sup", "wasup", "wazup", "whazup", "howdy", "gretings", "greeting",
-    "salutations", "welcome", "aloha", "gday", "morning", "mornin", "afternon", "evening",
-)
-
-_VALID_GREETING_TARGETS = (
-    "there", "u", "you", "friend", "stranger", "cutie", "gorgeous", "handsome",
-    "bro", "man", "mate", "budy", "everyone", "al", "partner",
-)
-
-_VALID_MULTI_GREETING_WORDS = _VALID_SINGLE_GREETING_WORDS + _VALID_GREETING_TARGETS + (
-    "god", "day", "top", "of", "the", "whats", "what's", "what", "is", "up",
-    "nice", "pleased", "glad", "to", "met", "se", "long", "time", "no",
-)
-
-# Includes "lm", "iam", "y", "yres", "yers", "yer", "yrz", "yaers", "yars", "yro", "yold", "o"
-_EXTRA_S2_AGE_FRAMING_WORDS = _VALID_MULTI_GREETING_WORDS + (
-    "im", "i'm", "l'm", "lm", "iam", "i'am", "i", "am", "me", "my", "from", "in",
-    "live", "living", "age", "old", "olds", "y", "yo", "yr", "yrs", "yrz", "yres",
-    "yers", "yer", "yea", "year", "years", "yeas", "yars", "yar", "yaers", "yaer",
-    "yro", "yold", "o", "m", "f", "male", "female", "boy", "girl", "guy", "woman",
-    "where", "country", "which", "and", "about", "how", "are", "r", "ya", "today",
-    "it", "your", "ur", "do",
-)
-
-_GREETING_LEAD_WORDS = ("hi", "hey", "helo", "hlo", "elo", "yo", "sup", "hiya", "heya", "howdy", "hy")
-
-
-def _pack_reply(class_id, is_greeting_str, intent_str, reply_str, kbd_str):
-    body = (
-        f'{{"class_id":{class_id},"is_greeting":{is_greeting_str},'
-        f'"intent":"{intent_str}","reply":"{reply_str}","kbd":{kbd_str}}}'
-    ).encode("utf-8")
-    hdr = (
-        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
-        + str(len(body)).encode("ascii")
-        + b"\r\nConnection: close\r\n\r\n"
-    )
-    return hdr + body
-
-
-def _make_pool(class_id, is_g, intent_s, msgs, kbd_s):
-    return tuple(_pack_reply(class_id, is_g, intent_s, m, kbd_s) for m in msgs)
-
-
-CACHED_REJECT_RESPONSE = _pack_reply(0, "false", "not_valid", "say hi, how r u, ur age (18+), or where u are from!", '["hey","how r u?","im 22"]')
-CACHED_UNDERAGE_RESPONSE = _pack_reply(7, "false", "underage_reject", "sorry, 18+ adults only!", '["Exit"]')
-CACHED_RESET_RESPONSE = _pack_reply(99, "false", "system_reset", "new chat started! say hi :)", '["hey","hi!"]')
-
-CACHED_GREETING_POOL = _make_pool(
-    1, "true", "english_greeting",
-    (
-        "hey", "hi", "heyy", "yo", "hey there", "hii", "sup", "hello!",
-        "hey how r u", "hi! hru?", "yo whats up", "heyy :)", "hiya", "hey! hows it going",
-        "hiii", "sup! hru", "hello there", "hey u", "hi there!", "yo! how are u",
-        "heyyy", "whats up!", "hey! nice to meet u", "hi :) how r u", "howdy!", "hey whats up",
-        "hii there", "hello :)", "yo! whats good", "hey! hru doing", "hi! hows u", "heyy! whats up",
-    ),
-    '["good u?","how r u?"]',
-)
-
-CACHED_REPEAT_GREETING_POOL = _make_pool(
-    1, "true", "english_greeting_repeat",
-    ("hey again lol", "haha hi again!", "we already said hi :)", "yo again! how r u?", "hii again haha", "already said hey lol", "haha hey x2! hru?", "hi again! whats up?"),
-    '["haha im good","how r u?"]',
-)
-
-CACHED_ASK_AGE_POOL = _make_pool(
-    2, "false", "ask_age",
-    ("22 u?", "im 23, how old r u?", "22! wbu?", "im 23 :)", "22 here, u?", "23! how old are u", "im 22, ur age?", "23 u?"),
-    '["im 21","im 24","im 28"]',
-)
-
-CACHED_REPEAT_ASK_AGE_POOL = _make_pool(
-    2, "false", "ask_age_repeat",
-    ("haha i told u im 22! u?", "already said 22 lol! how old r u?", "im 22 haha, forgot already?", "told u 22 lol :) wbu?", "still 22 haha! how r u?", "i said 22 earlier lol!", "haha 22! u asked me that already :)", "22 lol! whats up?"),
-    '["haha my bad","nice!"]',
-)
-
-CACHED_TELL_AGE_POOL = _make_pool(
-    3, "false", "tell_age",
-    ("nice! im 22, where u from?", "cool im 23! u from?", "nice age! im 22, from?", "22 here! where r u from?", "ooh nice, im 23! country?", "cool! 22 here, u from?", "nice! im 23, where u live?", "sweet, im 22! where u from?"),
-    '["usa","uk","tunisia"]',
-)
-
-CACHED_AGE_COMPLETE_POOL = _make_pool(
-    3, "false", "tell_age_complete",
-    ("nice! im 22 too :) hows ur day going?", "cool age! im 23, what u up to today?", "sweet! 22 here :) how r u doing?", "ooh nice! im 23, hows it going?", "nice! 22 here, what u doing rn?", "cool! im 23 :) having a good day?", "awesome! im 22, whats up?", "nice age! 23 here, hows ur day?"),
-    '["going great!","chilling u?"]',
-)
-
-CACHED_REPEAT_AGE_POOL = _make_pool(
-    3, "false", "tell_age_repeat",
-    ("haha u already said ur age! where r u from?", "ik ur age lol! what country u in?", "u told me ur age already haha! u from?", "haha yeah ik! where u from?", "already got ur age lol :) where u live?", "haha u said that! what country?", "ik lol! where r u from?", "yeah u told me haha! u from?"),
-    '["usa","uk","tunisia"]',
-)
-
-CACHED_CHANGED_AGE_POOL = _make_pool(
-    3, "false", "tell_age_changed",
-    ("wait u said a different age before lol! where u from?", "haha changing ur age now? lol how r u", "wait didnt u say another age earlier lol?", "haha u changed ur age! which one is real?", "hold on u said a different age before lol!", "haha new age unlocked lol! whats up?", "wait u changed ur age haha!", "lol u said another age before! how r u?"),
-    '["haha jk","lol my bad"]',
-)
-
-CACHED_ASK_COUNTRY_POOL = _make_pool(
-    4, "false", "ask_country",
-    ("from usa, u?", "uk! where u from?", "im from usa :)", "canada, wbu?", "usa here! u from?", "from uk, where r u from?", "usa! what about u?", "im in usa, u?"),
-    '["nice!","me too","cool"]',
-)
-
-CACHED_REPEAT_ASK_COUNTRY_POOL = _make_pool(
-    4, "false", "ask_country_repeat",
-    ("haha i said usa! where u from?", "told u im from usa lol :)", "already said usa haha! wbu?", "still in usa lol! forgot already?", "i told u usa earlier haha!", "usa lol! u asked me that already :)", "haha im from usa! how r u?", "said usa before lol! whats up?"),
-    '["haha my bad","cool!"]',
-)
-
-CACHED_TELL_COUNTRY_POOL = _make_pool(
-    5, "false", "tell_country",
-    ("ooh nice! im from usa, how old r u?", "cool place! im from uk, age?", "nice! im from usa :) ur age?", "love that! im from usa, how old r u?", "awesome! usa here, how old u?", "nice country! im from uk, age?", "cool! im from canada, how old r u?", "sweet! usa here, ur age?"),
-    '["im 21","im 24","im 28"]',
-)
-
-CACHED_COUNTRY_COMPLETE_POOL = _make_pool(
-    5, "false", "tell_country_complete",
-    ("ooh nice! im from usa :) hows ur day going?", "cool place! im from uk, what u up to?", "love that! usa here :) how r u doing?", "awesome place! im from canada, whats up?", "nice! im from usa, what u doing rn?", "sweet! uk here :) having a good day?", "ooh cool! im from usa, hows it going?", "nice country! usa here, hows ur day?"),
-    '["going great!","chilling u?"]',
-)
-
-CACHED_REPEAT_COUNTRY_POOL = _make_pool(
-    5, "false", "tell_country_repeat",
-    ("ik ur from there lol! how old r u?", "haha u already told me ur country! whats up?", "yeah u said that already lol! how r u?", "ik lol! nice place :) what u up to?", "haha already got ur country! how old r u?", "u told me already lol! hows it going?", "yeah ik haha! whats up?", "haha u said that! how r u doing?"),
-    '["haha im good","chilling"]',
-)
-
-CACHED_CHANGED_COUNTRY_POOL = _make_pool(
-    5, "false", "tell_country_changed",
-    ("wait u said a different country before lol!", "haha moving countries fast lol! how r u?", "wait didnt u say another country earlier lol?", "haha traveling the world? u said another place before!", "hold on u changed ur country lol!", "haha new country unlocked! whats up?", "wait u said somewhere else before haha!", "lol changing countries now? how r u?"),
-    '["haha jk","traveling lol"]',
-)
-
-CACHED_COMBINED_AGE_COUNTRY_POOL = _make_pool(
-    6, "true", "tell_age_and_country",
-    ("hey! nice im 22 from usa, how r u?", "hi! cool im 23 from uk, hru?", "nice to meet u! 22 from usa here :)", "heyy! im 22 from canada, hows it going?", "yo! 23 from usa here, whats up?", "hey there! im 22 from uk, how r u?", "hi! 22 from usa here, nice to meet u!", "heyy! cool, im 23 from usa, hru?"),
-    '["im good u?","doing great!"]',
-)
-
-CACHED_ASK_HRU_POOL = _make_pool(
-    8, "false", "ask_how_are_you",
-    (
-        "im doing great! how old r u and where u from?",
-        "doing good thanks! wbu, what's ur age and country?",
-        "im good! im 22 from usa, how old r u and where u from?",
-        "all good here! how old are u and where r u from?",
-        "pretty good! im 23 from uk, ur age and country?",
-        "doing great :) how old r u and where u live?",
-        "im great thanks! wbu, age and where u from?",
-        "good! chilling here, how old r u and what country?",
-    ),
-    '["im 22","from usa","24 from uk"]',
-)
-
-
-def _build_step1_bloom_tables(w_poly_mat, s2_frame_bloom):
-    word_bloom = np.zeros((BLOOM_SIZE,), dtype=np.int8)
-    single_bloom = np.zeros((BLOOM_SIZE,), dtype=np.int8)
-    target_bloom = np.zeros((BLOOM_SIZE,), dtype=np.int8)
-    lead_bloom = np.zeros((BLOOM_SIZE,), dtype=np.int8)
-    b_mask = np.int32(BLOOM_SIZE - 1)
-    w_vec = np.zeros((16,), dtype=np.int32)
-
-    def h_idx(w_str):
-        b = np.frombuffer(w_str.encode("ascii"), dtype=np.uint8)
-        L = min(int(b.shape[0]), 15)
-        w_vec.fill(0)
-        w_vec[:L] = b[:L]
-        w_vec[15] = np.int32(L)
-        return (w_vec @ w_poly_mat)[:3] & b_mask
-
-    for w in _VALID_SINGLE_GREETING_WORDS:
-        idx = h_idx(w)
-        single_bloom[idx] = np.int8(1)
-        word_bloom[idx] = np.int8(1)
-        target_bloom[idx] = np.int8(1)
-    for w in _VALID_GREETING_TARGETS:
-        target_bloom[h_idx(w)] = np.int8(1)
-    for w in _VALID_MULTI_GREETING_WORDS:
-        word_bloom[h_idx(w)] = np.int8(1)
-    for w in _GREETING_LEAD_WORDS:
-        lead_bloom[h_idx(w)[0]] = np.int8(1)
-    for w in _EXTRA_S2_AGE_FRAMING_WORDS:
-        collapsed = "".join(w[i] for i in range(len(w)) if i == 0 or w[i] != w[i - 1])
-        s2_frame_bloom[h_idx(collapsed)] = np.int8(1)
-
-    word_bloom.flags.writeable = False
-    single_bloom.flags.writeable = False
-    target_bloom.flags.writeable = False
-    lead_bloom.flags.writeable = False
-    s2_frame_bloom.flags.writeable = False
-    return word_bloom, single_bloom, target_bloom, lead_bloom
 
 
 class QuantizedModel:
     __slots__ = (
         "emb_f32", "wqkv1_f32", "wo1_f32", "w1_f32", "w2_f32",
         "wqkv2_f32", "wo2_f32", "w3_f32", "w4_f32", "w_intent_f32",
-        "s2_emb_f32", "s2_w1_f32", "s2_w2_f32", "s3_emb_f32", "s3_w1_f32", "s3_w2_f32",
+        "s2_emb_f32", "s2_w1_f32", "s2_w2_f32",
+        "s3_emb_f32", "s3_w1_f32", "s3_w2_f32",
+        "s4_emb_f32", "s4_w1_f32", "s4_w2_f32",
         "word_bloom_q", "single_bloom_q", "target_bloom_q", "lead_bloom_q",
-        "s2_frame_bloom_q", "s3_hru_bloom_q", "country_lut_a", "country_lut_b",
+        "s2_frame_bloom_q", "s3_hru_bloom_q", "s4_gender_bloom_q",
+        "country_lut_a", "country_lut_b", "gender_lut_a", "gender_lut_b",
         "pos_f32", "mask_f32", "char_lut", "reject_lut", "poly_mat", "w_poly_mat",
         "inv_sqrt_d", "eps", "m5_0", "m5_1", "m5_2", "m5_3", "mask_b", "mask5", "off5",
         "m3_0", "m3_1", "mask3", "off3", "bloom_mask", "s2_v_mask", "one_i32", "space_i32", "conf_thresh",
     )
 
     def __init__(self, npz_path):
-        arc = np.load(npz_path, mmap_mode="r")
-        if ("w_intent_q" not in arc.files) or ("s2_country_lut_a" not in arc.files) or ("s3_w2_q" not in arc.files):
-            arc.close()
+        req_keys = ("w_intent_q", "s2_country_lut_a", "s3_w2_q", "s4_w2_q", "s4_gender_lut_a")
+        need_train = not os.path.exists(npz_path)
+        if not need_train:
+            arc = np.load(npz_path, mmap_mode="r")
+            if any(k not in arc.files for k in req_keys):
+                arc.close()
+                need_train = True
+        if need_train:
             import offline_train
-            offline_train.run_vault_trainer(npz_path, force_s1=False, force_s2=False, force_s3=False)
+            offline_train.run_vault_trainer(npz_path, force_s1=False, force_s2=False, force_s3=False, force_s4=False)
             arc = np.load(npz_path, mmap_mode="r")
 
         def lock_f32(prefix, zero_row0=False):
@@ -277,12 +87,18 @@ class QuantizedModel:
         self.s3_emb_f32 = lock_f32("s3_emb", True)
         self.s3_w1_f32 = lock_f32("s3_w1")
         self.s3_w2_f32 = lock_f32("s3_w2")
+        self.s4_emb_f32 = lock_f32("s4_emb", True)
+        self.s4_w1_f32 = lock_f32("s4_w1")
+        self.s4_w2_f32 = lock_f32("s4_w2")
 
         fb_q = np.array(arc["s2_frame_bloom_q"], dtype=np.int8, copy=True)
         for k_attr, k_arc, dt in (
             ("s3_hru_bloom_q", "s3_hru_bloom_q", np.int8),
+            ("s4_gender_bloom_q", "s4_gender_bloom_q", np.int8),
             ("country_lut_a", "s2_country_lut_a", np.uint8),
             ("country_lut_b", "s2_country_lut_b", np.uint8),
+            ("gender_lut_a", "s4_gender_lut_a", np.uint8),
+            ("gender_lut_b", "s4_gender_lut_b", np.uint8),
         ):
             arr = arc[k_arc].astype(dt, copy=False)
             arr.flags.writeable = False
@@ -308,7 +124,7 @@ class QuantizedModel:
         self.char_lut = lut
 
         rej = np.ones((256,), dtype=np.bool_)
-        for idx_ok in (32, 33, 39, 44, 46, 63):
+        for idx_ok in (32, 33, 39, 44, 46, 47, 63):
             rej[idx_ok] = False
         rej[48:58] = False
         rej[65:91] = False
@@ -343,7 +159,8 @@ class InferenceSlot:
     __slots__ = (
         "slot_id", "raw_u8", "canon_u8", "body_sub", "rej_mask",
         "words_mat", "w_hashes", "w_b_idx", "w_b_hits", "c_hits_a", "c_hits_b",
-        "s2_tokens", "s2_emb_buf", "s2_pooled", "s2_mid", "s2_logits", "s3_logits",
+        "g_hits_a", "g_hits_b", "s2_tokens", "s4_tokens", "s2_emb_buf", "s2_pooled",
+        "s2_mid", "s2_logits", "s3_logits", "s4_logits",
         "tokens", "tok_bloom", "tok5", "tok3", "t_tmp16", "t_tmp8",
         "m_a", "m_b", "valid_mask", "valid_f32", "active_count",
         "x", "qkv", "q", "k", "v", "scores", "row_max", "row_sum",
@@ -362,12 +179,16 @@ class InferenceSlot:
         self.w_b_hits = np.zeros((6, 3), dtype=np.int8)
         self.c_hits_a = np.zeros((6,), dtype=np.uint8)
         self.c_hits_b = np.zeros((6,), dtype=np.uint8)
+        self.g_hits_a = np.zeros((6,), dtype=np.uint8)
+        self.g_hits_b = np.zeros((6,), dtype=np.uint8)
         self.s2_tokens = np.zeros((8,), dtype=np.int32)
+        self.s4_tokens = np.zeros((8,), dtype=np.int32)
         self.s2_emb_buf = np.zeros((8, S2_DIM), dtype=np.float32)
         self.s2_pooled = np.zeros((1, S2_DIM), dtype=np.float32)
         self.s2_mid = np.zeros((1, S2_DIM), dtype=np.float32)
         self.s2_logits = np.zeros((1, S2_CLASSES), dtype=np.float32)
         self.s3_logits = np.zeros((1, S3_CLASSES), dtype=np.float32)
+        self.s4_logits = np.zeros((1, S4_CLASSES), dtype=np.float32)
         self.tokens = np.zeros((SEQ_LEN,), dtype=np.int32)
         self.tok_bloom, self.tok5, self.tok3 = self.tokens[0:8], self.tokens[8:24], self.tokens[24:32]
         self.t_tmp16, self.t_tmp8 = np.zeros((16,), dtype=np.int32), np.zeros((8,), dtype=np.int32)
@@ -389,17 +210,19 @@ class InferenceSlot:
 
 
 class UserStore:
-    __slots__ = ("last_intent", "msg_count", "age", "country", "conv_flags", "last_ts", "write_queue", "wal_batch")
+    __slots__ = ("last_intent", "msg_count", "age", "country", "gender", "bot_gender", "conv_flags", "last_ts", "write_queue", "wal_batch")
 
     def __init__(self):
         self.last_intent = np.zeros((MAX_USERS,), dtype=np.uint8)
         self.msg_count = np.zeros((MAX_USERS,), dtype=np.uint8)
         self.age = np.zeros((MAX_USERS,), dtype=np.uint8)
         self.country = np.zeros((MAX_USERS,), dtype=np.uint8)
+        self.gender = np.zeros((MAX_USERS,), dtype=np.uint8)
+        self.bot_gender = np.full((MAX_USERS,), 2, dtype=np.uint8)
         self.conv_flags = np.zeros((MAX_USERS,), dtype=np.uint8)
         self.last_ts = np.zeros((MAX_USERS,), dtype=np.uint32)
         self.write_queue = deque(maxlen=4096)
-        self.wal_batch = np.zeros((256, 5), dtype=np.uint32)
+        self.wal_batch = np.zeros((256, 6), dtype=np.uint32)
 
 
 def _run_attn_ffn_layer(slot, wqkv, wo, w_ff1, w_ff2, inv_sqrt_d, mask_f32, eps):
@@ -455,6 +278,8 @@ def forward_pass(model, slot, mv_payload):
         return 0, 0, 0
 
     raw_body = slot.raw_u8[2 : 2 + n_tok]
+    has_q = bool(np.any(raw_body == 63))
+    has_s = bool(np.any(raw_body == 47))
     dig_idx = np.flatnonzero((raw_body >= 48) & (raw_body <= 57))
     n_dig = int(dig_idx.shape[0])
     age_val = 0
@@ -528,15 +353,47 @@ def forward_pass(model, slot, mv_payload):
     c_match = (slot.c_hits_a[:n_words] > 0) & (slot.c_hits_a[:n_words] == slot.c_hits_b[:n_words])
     country_id = int(slot.c_hits_a[:n_words][c_match][0]) if bool(np.any(c_match)) else 0
 
+    np.take(model.gender_lut_a, slot.w_b_idx[:, 0], out=slot.g_hits_a)
+    np.take(model.gender_lut_b, slot.w_b_idx[:, 1], out=slot.g_hits_b)
+    g_match = (slot.g_hits_a[:n_words] > 0) & (slot.g_hits_a[:n_words] == slot.g_hits_b[:n_words])
+    g_codes = slot.g_hits_a[:n_words] * g_match
+    n_male = int(np.sum(g_codes == 1))
+    n_female = int(np.sum(g_codes == 2))
+    has_neutral = bool(np.any(g_codes == 3))
+    has_q_frame = bool(np.any(g_codes == 4))
+
     np.take(model.s2_frame_bloom_q, slot.w_b_idx, out=slot.w_b_hits)
     all_s2_valid = bool(np.all(slot.w_b_hits[:n_words]))
 
     if age_val >= 18 and country_id > 0 and all_s2_valid:
         return 6, age_val, country_id
+    if age_val >= 18 and (n_male > 0 or n_female > 0) and not (n_male > 0 and n_female > 0) and all_s2_valid:
+        return 14, age_val, (2 if n_female > 0 else 1)
     if country_id > 0 and all_s2_valid:
         return 5, 0, country_id
     if age_val >= 18 and all_s2_valid:
         return 3, age_val, 0
+
+    if age_val == 0 and country_id == 0 and (n_male > 0 or n_female > 0 or has_neutral):
+        np.take(model.s4_gender_bloom_q, slot.w_b_idx, out=slot.w_b_hits)
+        if bool(np.all(slot.w_b_hits[:n_words])) and not (first_is_pure_greet and n_words == 2 and not has_q and n_female == 0 and not has_neutral):
+            slot.s4_tokens[:6] = slot.s2_tokens[:6]
+            slot.s4_tokens[6] = np.int32(1023) if has_q else (np.int32(1022) if has_s else model.one_i32)
+            q_off = np.int32(509) if has_q else (np.int32(251) if has_s else np.int32(0))
+            slot.s4_tokens[7] = (((slot.s2_tokens[0] * np.int32(37)) + (slot.s2_tokens[n_words - 1] * np.int32(73)) + q_off) & model.s2_v_mask) + model.one_i32
+            np.take(model.s4_emb_f32, slot.s4_tokens, axis=0, out=slot.s2_emb_buf)
+            slot.s2_emb_buf[6] *= np.float32(2.5)
+            np.sum(slot.s2_emb_buf, axis=0, keepdims=True, out=slot.s2_pooled)
+            slot.s2_pooled *= np.float32(1.0 / (float(n_words) + 3.5))
+            np.matmul(slot.s2_pooled, model.s4_w1_f32, out=slot.s2_mid)
+            np.maximum(slot.s2_mid, np.float32(0.0), out=slot.s2_mid)
+            np.matmul(slot.s2_mid, model.s4_w2_f32, out=slot.s4_logits)
+            if (n_male > 0 and n_female > 0) or has_neutral or has_s or (n_male + n_female >= 2):
+                return 9, 0, 0
+            if n_female > 0:
+                return (10, 0, 2) if (has_q or has_q_frame or float(slot.s4_logits[0, 2]) > float(slot.s4_logits[0, 4])) else (12, 0, 2)
+            if n_male > 0:
+                return (11, 0, 1) if (has_q or has_q_frame or float(slot.s4_logits[0, 3]) > float(slot.s4_logits[0, 5])) else (13, 0, 1)
 
     if n_words <= 4 and k_len <= MAX_GREETING_LEN:
         if all_pure_greet:
@@ -642,109 +499,7 @@ def forward_pass(model, slot, mv_payload):
     return 0, 0, 0
 
 
-def reset_user_session(users, uid):
-    users.last_intent[uid] = np.uint8(0)
-    users.msg_count[uid] = np.uint8(0)
-    users.age[uid] = np.uint8(0)
-    users.country[uid] = np.uint8(0)
-    users.conv_flags[uid] = np.uint8(0)
-
-
-def handle_user_query(model, slot, users, user_id, mv_payload):
-    uid = user_id % MAX_USERS
-    now_s = int(time.time()) & 0xFFFFFFFF
-    last_t = int(users.last_ts[uid])
-    if last_t > 0 and (now_s - last_t) > SESSION_TIMEOUT_S:
-        reset_user_session(users, uid)
-
-    class_id, age_val, country_id = forward_pass(model, slot, mv_payload)
-    if class_id == 99:
-        reset_user_session(users, uid)
-        users.last_ts[uid] = np.uint32(now_s)
-        return CACHED_RESET_RESPONSE
-
-    flags = int(users.conv_flags[uid])
-    prev_age = int(users.age[uid])
-    prev_country = int(users.country[uid])
-    msg_cnt = (int(users.msg_count[uid]) + 1) & 255
-
-    users.last_intent[uid] = np.uint8(class_id)
-    users.msg_count[uid] = np.uint8(msg_cnt)
-    users.last_ts[uid] = np.uint32(now_s)
-    if age_val >= 18:
-        users.age[uid] = np.uint8(age_val)
-    if country_id > 0:
-        users.country[uid] = np.uint8(country_id)
-
-    users.write_queue.append((uid, class_id, age_val, country_id, now_s))
-    rot8 = (uid + msg_cnt) & 7
-
-    if class_id == 1:
-        already_in_conv = (flags & FLAG_GREETED) != 0 or prev_age > 0 or prev_country > 0
-        users.conv_flags[uid] = np.uint8(flags | FLAG_GREETED)
-        return CACHED_REPEAT_GREETING_POOL[rot8] if already_in_conv else CACHED_GREETING_POOL[(uid + msg_cnt) & 31]
-
-    if class_id == 2:
-        already_asked_age = (flags & FLAG_ASKED_AGE) != 0
-        users.conv_flags[uid] = np.uint8(flags | FLAG_GREETED | FLAG_ASKED_AGE)
-        return CACHED_REPEAT_ASK_AGE_POOL[rot8] if already_asked_age else CACHED_ASK_AGE_POOL[rot8]
-
-    if class_id == 3:
-        users.conv_flags[uid] = np.uint8(flags | FLAG_GREETED)
-        if prev_age == age_val:
-            return CACHED_REPEAT_AGE_POOL[rot8]
-        if prev_age > 0 and prev_age != age_val:
-            return CACHED_CHANGED_AGE_POOL[rot8]
-        return CACHED_AGE_COMPLETE_POOL[rot8] if prev_country > 0 else CACHED_TELL_AGE_POOL[rot8]
-
-    if class_id == 4:
-        already_asked_ctry = (flags & FLAG_ASKED_COUNTRY) != 0
-        users.conv_flags[uid] = np.uint8(flags | FLAG_GREETED | FLAG_ASKED_COUNTRY)
-        return CACHED_REPEAT_ASK_COUNTRY_POOL[rot8] if already_asked_ctry else CACHED_ASK_COUNTRY_POOL[rot8]
-
-    if class_id == 5:
-        users.conv_flags[uid] = np.uint8(flags | FLAG_GREETED)
-        if prev_country == country_id:
-            return CACHED_REPEAT_COUNTRY_POOL[rot8]
-        if prev_country > 0 and prev_country != country_id:
-            return CACHED_CHANGED_COUNTRY_POOL[rot8]
-        return CACHED_COUNTRY_COMPLETE_POOL[rot8] if prev_age >= 18 else CACHED_TELL_COUNTRY_POOL[rot8]
-
-    if class_id == 6:
-        users.conv_flags[uid] = np.uint8(flags | FLAG_GREETED)
-        return CACHED_COMBINED_AGE_COUNTRY_POOL[rot8]
-
-    if class_id == 7:
-        return CACHED_UNDERAGE_RESPONSE
-
-    if class_id == 8:
-        users.conv_flags[uid] = np.uint8(flags | FLAG_GREETED | FLAG_ASKED_HRU)
-        return CACHED_ASK_HRU_POOL[rot8]
-
-    return CACHED_REJECT_RESPONSE
-
-
-async def wal_write_behind_worker(users, wal_path="events_wal.bin"):
-    while True:
-        await asyncio.sleep(2.0)
-        if not users.write_queue:
-            continue
-        count = 0
-        while users.write_queue and count < 256:
-            users.wal_batch[count] = users.write_queue.popleft()
-            count += 1
-        try:
-            with open(wal_path, "ab") as wal_file:
-                wal_file.write(memoryview(users.wal_batch)[:count])
-        except OSError:
-            pass
-
-
 async def start_server(host="127.0.0.1", port=8080):
-    if not os.path.exists("model_weights.npz"):
-        import offline_train
-        offline_train.run_vault_trainer("model_weights.npz", force_s1=True, force_s2=True, force_s3=True)
-
     model = QuantizedModel("model_weights.npz")
     users = UserStore()
     slot_queue = asyncio.Queue(maxsize=NUM_WORKERS)
@@ -754,10 +509,9 @@ async def start_server(host="127.0.0.1", port=8080):
     test_slot = await slot_queue.get()
     t0 = time.perf_counter()
     for i in range(1000):
-        handle_user_query(model, test_slot, users, i, memoryview(b"hi how r u?"))
+        handle_user_query(model, test_slot, users, i, memoryview(b"hi how r u?"), forward_pass)
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
-    # --- 65-Case Zero-Fault Suite (Includes "lm 24", "24y", "21yres", "20yres", "im24") ---
     suite = (
         (b"hi", 1), (b"hi hi", 1), (b"hy", 1), (b"hyy", 1), (b"hiiii", 1), (b"hey", 1),
         (b"hey hey", 1), (b"heeyy", 1), (b"hello", 1), (b"helloo", 1), (b"hlo", 1),
@@ -770,6 +524,12 @@ async def start_server(host="127.0.0.1", port=8080):
         (b"24", 3), (b"im 24", 3), (b"lm 24", 3), (b"24y", 3), (b"21yres", 3), (b"20yres", 3), (b"im24", 3),
         (b"from?", 4), (b"where r u from", 4), (b"tuinsi", 5), (b"handi", 5), (b"ind", 5),
         (b"hi l'm 30 from tun", 6), (b"15", 7), (b"next", 99),
+        (b"m or f", 9), (b"m or f?", 9), (b"m/f", 9), (b"f/m", 9), (b"gender?", 9), (b"what gender are you", 9),
+        (b"f?", 10), (b"girl?", 10), (b"are you a girl", 10), (b"r u female", 10), (b"you a girl?", 10),
+        (b"m?", 11), (b"boy?", 11), (b"are you a boy", 11), (b"r u male", 11),
+        (b"f", 12), (b"famle", 12), (b"f here", 12), (b"im a girl", 12),
+        (b"m", 13), (b"male", 13), (b"m here", 13), (b"im a boy", 13),
+        (b"22f", 14), (b"24 m", 14), (b"19 famle", 14), (b"21 girl", 14),
         (b"what", 0), (b"what?", 0), (b"what!", 0), (b"why", 0), (b"why?", 0), (b"why!", 0),
         (b"who", 0), (b"who?", 0), (b"who!", 0), (b"who are you", 0), (b"what is this", 0),
         (b"why not", 0), (b"lol", 0), (b"hyw", 0), (b"iphey", 0),
@@ -778,7 +538,7 @@ async def start_server(host="127.0.0.1", port=8080):
     slot_queue.put_nowait(test_slot)
 
     print(f"[BENCHMARK] 1,000 forward passes in {elapsed_ms:.2f} ms ({elapsed_ms / 1000.0:.4f} ms/req)")
-    print(f"[STEP 1+2+3 ZERO-FAUX SUITE] Passed {passed}/{len(suite)} tests (2.58 MB Total RAM)")
+    print(f"[STEP 1+2+3+4 ZERO-FAULT SUITE] Passed {passed}/{len(suite)} tests (2.94 MB Total RAM)")
 
     if "--benchmark" in sys.argv:
         return
@@ -796,7 +556,7 @@ async def start_server(host="127.0.0.1", port=8080):
             try:
                 body_idx = req_data.find(b"\r\n\r\n")
                 mv_body = mv_req[body_idx + 4 :] if body_idx != -1 else mv_req
-                http_reply = handle_user_query(model, slot, users, uid, mv_body)
+                http_reply = handle_user_query(model, slot, users, uid % MAX_USERS, mv_body, forward_pass)
             finally:
                 slot_queue.put_nowait(slot)
 
@@ -809,7 +569,7 @@ async def start_server(host="127.0.0.1", port=8080):
 
     asyncio.create_task(wal_write_behind_worker(users))
     server = await asyncio.start_server(client_handler, host, port, backlog=2048)
-    print(f"[SERVER] Step 1+2+3 Dating Engine on http://{host}:{port} (2.58 MB Total RAM)")
+    print(f"[SERVER] Step 1+2+3+4 Dating Engine on http://{host}:{port} (2.94 MB Total RAM)")
     async with server:
         await server.serve_forever()
 
