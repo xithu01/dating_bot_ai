@@ -1,6 +1,5 @@
 # FILE: build_age_country_txt.py
-# PURPOSE: Pull & clean Age + Country/Typo datasets from Hugging Face (load_dataset) + phonetic/typo rules
-# PYARMOR COMPATIBLE: < 260 lines, < 11 KB
+# PURPOSE: Build 100% pure ages.txt (with lm 24, 24y, 21yres, 20yres) & countries.txt (0 hru contamination)
 
 import logging
 import os
@@ -14,6 +13,14 @@ logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
 
 CLEAN_ASCII_RE = re.compile(r"^[a-z0-9\s'!?.,]+$")
 SPACE_RE = re.compile(r"\s+")
+
+# Blocks any status / "how are you" phrases from polluting ages.txt or countries.txt
+HRU_CONTAMINATION_RE = re.compile(
+    r"\b(?:hru|hyd|doing|doin|going|goin|wbu|hbu|hor|"
+    r"how\s+(?:are|r|is|was|have)\s+(?:you|u|ya|it|your|ur)|"
+    r"how\s+(?:u|ya)\s+doin|hows\s+(?:it|u|ur|your)|how's\s+(?:it|u|ur|your))\b",
+    re.IGNORECASE,
+)
 
 # Curated Country Catalog: (canonical, short codes & phonetic slang, 5+ letter roots for 1-edit typo generation)
 COUNTRY_CATALOG = (
@@ -38,29 +45,27 @@ COUNTRY_CATALOG = (
     ("brazil", ("br", "rio"), ("brazil", "brasil", "brazilian")),
 )
 
-# Blocks common English words and ambiguous city names (like "nice", "mobile", "bath", "male")
 ENGLISH_COLLISION_BLACKLIST = frozenset((
     "in", "us", "it", "me", "so", "to", "hi", "no", "do", "am", "be", "or", "by", "my",
+    "hru", "hyd", "hor", "how", "are", "doing", "doin", "going", "goin", "what", "why", "who", "lol",
     "and", "end", "mind", "find", "kind", "wind", "hand", "hind", "band", "land", "sand",
     "pain", "spin", "span", "stain", "train", "chain", "chains", "main", "rain", "gain",
     "man", "men", "woman", "women", "human", "roman", "male", "mail", "mall", "her",
     "here", "hear", "germs", "dance", "lance", "trance", "turkeys", "idea", "ideal",
-    "nice", "split", "bath", "reading", "mobile", "normal", " Lima", "lima", "victoria",
+    "nice", "split", "bath", "reading", "mobile", "normal", "lima", "victoria",
     "grace", "hope", "young", "best", "most", "ware", "deal", "sale", "tours", "angers",
 ))
 
-# Strict regex for extracting ONLY pure adult age questions & statements (18-80) from Hugging Face chats
 STRICT_AGE_CHAT_RE = re.compile(
     r"^(?:"
     r"age\??|ur\s+age\??|your\s+age\??|what(?:'s|\s+is)\s+(?:your|ur)\s+age\??|"
     r"how\s+old\s+(?:are\s+you|r\s+u|are\s+u|u)\??|how\s+old\??|"
-    r"(?:(?:hi|hey|hello)\s+)?(?:i\s+am|im|i'm|l'm)\s+(?:1[89]|[2-7][0-9]|80)(?:\s+(?:yo|yrs|years\s+old|m|f))?|"
-    r"(?:1[89]|[2-7][0-9]|80)(?:\s+(?:yo|yrs|years\s+old|m|f))?"
+    r"(?:(?:hi|hey|hello)\s+)?(?:i\s+am|im|i'm|l'm|lm|iam)\s*(?:1[89]|[2-7][0-9]|80)(?:\s*(?:y|yo|yr|yrs|yres|yers|years|years\s+old|m|f))?|"
+    r"(?:1[89]|[2-7][0-9]|80)(?:\s*(?:y|yo|yr|yrs|yres|yers|years|years\s+old|m|f))?"
     r")[\s!?.]*$",
     re.IGNORECASE,
 )
 
-# Strict regex for extracting ONLY pure "from?" / country questions from Hugging Face chats
 STRICT_FROM_QUESTION_RE = re.compile(
     r"^(?:"
     r"from\??|u\s+from\??|where\s+from\??|country\??|ur\s+country\??|your\s+country\??|"
@@ -87,12 +92,12 @@ def generate_1edit_typos(word):
         return out
     for i in range(1, len(word) - 1):
         swapped = word[:i] + word[i + 1] + word[i] + word[i + 2 :]
-        if swapped not in ENGLISH_COLLISION_BLACKLIST:
+        if swapped not in ENGLISH_COLLISION_BLACKLIST and not HRU_CONTAMINATION_RE.search(swapped):
             out.add(swapped)
     if len(word) >= 6:
         for i in range(1, len(word) - 1):
             dropped = word[:i] + word[i + 1 :]
-            if len(dropped) >= 5 and dropped not in ENGLISH_COLLISION_BLACKLIST:
+            if len(dropped) >= 5 and dropped not in ENGLISH_COLLISION_BLACKLIST and not HRU_CONTAMINATION_RE.search(dropped):
                 out.add(dropped)
     return out
 
@@ -103,7 +108,6 @@ def pull_huggingface_countries_and_cities(country_aliases):
     except ImportError:
         return
 
-    # 1. Pull world countries from Hugging Face: bamwor/world-countries
     try:
         ds_countries = load_dataset("bamwor/world-countries", split="train")
         for name_raw in ds_countries["name"]:
@@ -114,7 +118,6 @@ def pull_huggingface_countries_and_cities(country_aliases):
     except Exception:
         pass
 
-    # 2. Pull world capitals & mega-cities from Hugging Face: bamwor/world-cities
     try:
         ds_cities = load_dataset("bamwor/world-cities", split="train")
         for name_raw, feat_code, pop_val in zip(
@@ -138,11 +141,10 @@ def pull_huggingface_age_and_from_chats(age_lines, country_lines, country_aliase
         return
 
     inline_loc_re = re.compile(
-        r"^(?:(?:hi|hey|hello)\s+)?(?:i\s+am|im|i'm|l'm)?\s*(?:from|in|live\s+in)\s+([a-z]{2,15})[\s!?.]*$",
+        r"^(?:(?:hi|hey|hello)\s+)?(?:i\s+am|im|i'm|l'm|lm)?\s*(?:from|in|live\s+in)\s+([a-z]{2,15})[\s!?.]*$",
         re.IGNORECASE,
     )
 
-    # 3. Pull real conversational age/location lines from Persona-Chat & Tanaos
     chat_repos = (
         ("bavard/personachat_truecased", "train", "history"),
         ("AlekseyKorshuk/persona-chat", "train", "utterances"),
@@ -159,7 +161,7 @@ def pull_huggingface_age_and_from_chats(age_lines, country_lines, country_aliase
                     if not isinstance(raw_s, str):
                         continue
                     s = SPACE_RE.sub(" ", raw_s.strip().lower())
-                    if not s or len(s) > 30 or not CLEAN_ASCII_RE.match(s):
+                    if not s or len(s) > 30 or not CLEAN_ASCII_RE.match(s) or HRU_CONTAMINATION_RE.search(s):
                         continue
                     if STRICT_AGE_CHAT_RE.match(s):
                         age_lines.add(s.rstrip("!.?"))
@@ -181,16 +183,35 @@ def build_age_and_country_files(
     neg_path="negatives.txt",
 ):
     age_lines = set(AGE_QUESTIONS)
+    # Valid adult ages (18 to 80) including "lm 24", "24y", "21yres", "20yres", "24yers", "im24", "lm24"
     for age in range(18, 81):
         age_lines.add(f"{age}")
         age_lines.add(f"im {age}")
         age_lines.add(f"i'm {age}")
         age_lines.add(f"l'm {age}")
+        age_lines.add(f"lm {age}")
+        age_lines.add(f"iam {age}")
         age_lines.add(f"i am {age}")
+        age_lines.add(f"im{age}")
+        age_lines.add(f"lm{age}")
+        age_lines.add(f"{age}y")
+        age_lines.add(f"{age} y")
+        age_lines.add(f"{age}yo")
         age_lines.add(f"{age} yo")
+        age_lines.add(f"{age}yr")
+        age_lines.add(f"{age} yr")
+        age_lines.add(f"{age}yrs")
         age_lines.add(f"{age} yrs")
+        age_lines.add(f"{age}yres")
+        age_lines.add(f"{age} yres")
+        age_lines.add(f"{age}yers")
+        age_lines.add(f"{age} yers")
+        age_lines.add(f"{age}years")
+        age_lines.add(f"{age} years")
         age_lines.add(f"{age} m")
         age_lines.add(f"{age} f")
+        age_lines.add(f"{age}m")
+        age_lines.add(f"{age}f")
 
     country_aliases = set()
     for canon, short_codes, long_roots in COUNTRY_CATALOG:
@@ -207,28 +228,31 @@ def build_age_and_country_files(
     pull_huggingface_age_and_from_chats(age_lines, country_lines, country_aliases)
 
     for alias in sorted(country_aliases):
+        if HRU_CONTAMINATION_RE.search(alias):
+            continue
         country_lines.add(alias)
         country_lines.add(f"from {alias}"[:30])
         country_lines.add(f"im from {alias}"[:30])
         country_lines.add(f"i'm from {alias}"[:30])
+        country_lines.add(f"lm from {alias}"[:30])
         country_lines.add(f"in {alias}"[:30])
         country_lines.add(f"hi from {alias}"[:30])
         country_lines.add(f"hey from {alias}"[:30])
         country_lines.add(f"hi im from {alias}"[:30])
         country_lines.add(f"hi l'm 30 from {alias}"[:30])
-        country_lines.add(f"hi im 24 from {alias}"[:30])
+        country_lines.add(f"hi lm 24 from {alias}"[:30])
 
-    sorted_ages = sorted(age_lines)
+    sorted_ages = sorted(s for s in age_lines if not HRU_CONTAMINATION_RE.search(s))
     with open(ages_path, "w", encoding="ascii") as fa:
         for line in sorted_ages:
             fa.write(line + "\n")
 
-    sorted_countries = sorted(country_lines)
+    sorted_countries = sorted(s for s in country_lines if not HRU_CONTAMINATION_RE.search(s))
     with open(countries_path, "w", encoding="ascii") as fc:
         for line in sorted_countries:
             fc.write(line + "\n")
 
-    all_staged = sorted(age_lines | country_lines)
+    all_staged = sorted(set(sorted_ages) | set(sorted_countries))
     with open(staging_path, "w", encoding="ascii") as fs:
         for line in all_staged:
             fs.write(line + "\n")
@@ -249,9 +273,8 @@ def build_age_and_country_files(
         for line in sorted(existing_neg):
             fn.write(line + "\n")
 
-    print(f"[CLEAN AGES] Wrote {len(sorted_ages)} pure adult age & question lines to '{ages_path}'", flush=True)
-    print(f"[CLEAN COUNTRIES] Wrote {len(sorted_countries)} pure country/city/typo lines to '{countries_path}'", flush=True)
-    print(f"[STEP 1 SYNC] Synced {len(existing_neg)} total Class 0 negatives to '{neg_path}'", flush=True)
+    print(f"[CLEAN AGES] Overwrote {len(sorted_ages)} pure age lines to '{ages_path}' (includes lm 24, 24y, 21yres)", flush=True)
+    print(f"[CLEAN COUNTRIES] Overwrote {len(sorted_countries)} pure country lines to '{countries_path}'", flush=True)
 
 
 if __name__ == "__main__":

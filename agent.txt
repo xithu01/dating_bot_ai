@@ -156,3 +156,6 @@ files.download(drive_weights)
 !python build_greetings_txt.py
 !python offline_train.py --force
 !python production_server.py --benchmark
+
+
+python offline_train.py --step1
