@@ -1,11 +1,14 @@
+#!/usr/bin/env python3
 # FILE: build_hru_txt.py
-# PURPOSE: Build 100% pure hru.txt (Class 8: ask_how_are_you) with zero gender leaks
+# PURPOSE: Build clean hru.txt (Class 8: ask_how_are_you) with slang, targets, punctuation & keyboard typos
+# RULES: Enforces zero float64/int64, strict isolation against Class 0 ("what"/"why"/"who"), Step 2, and Step 4
 
 import json
 import logging
 import os
 import re
 import warnings
+import numpy as np
 
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["HF_HUB_VERBOSITY"] = "error"
@@ -15,31 +18,36 @@ logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
 CLEAN_HRU_CHARS_RE = re.compile(r"^[a-z\s'!?.,]+$")
 SPACE_RE = re.compile(r"\s+")
 
-# Strictly matches genuine "how are you" / status questions while blocking "what", "why", "who", "how old", and gender words
+# Strictly matches genuine "how are you" / status questions (including "how do you do" & trailing targets)
+# while blocking "what", "why", "who", "how old", "where from", and all gender phrases.
 STRICT_HRU_RE = re.compile(
-    r"^(?:(?:hi+|he+y+|he+l+o+|hlo+|yo+|sup+)\s+)?"
+    r"^(?:(?:hi+|he+y+|he+l+o+|hlo+|yo+|sup+|h+i+y+a+|h+o+w+d+y+)\s+)?"
     r"(?:"
-    r"h+r+u+(?:\s+d+o+i+n+g*|\s+t+o+d+a+y+)?|"
+    r"h+r+u+(?:\s+(?:d+o+i+n+g*|t+o+d+a+y+))?|"
     r"h+y+d+(?:\s+t+o+d+a+y+)?|"
     r"h+o+r+|w+b+u+|h+b+u+|"
-    r"(?:h+o+w+|h+w+|h+o+i+w+)\s+(?:a+r+e+|a+r+|a+e+r+|r+e*|i+s+|w+a+s+|w+h+a+s+|h+a+v+e+)\s+"
+    r"(?:h+o+w+|h+w+|h+o+i+w+)\s+(?:a+r+e+|a+r+|a+e+r+|r+e*|i+s+|w+a+s+|w+h+a+s+|h+a+v+e+|d+o+)\s+"
     r"(?:y+o+u+|y+u+o+|y+u+|u+|y+a+|i+t+|y+o+u+r+|u+r+|t+h+i+n+g+s+|e+v+e+r+y+t+h+i+n+g+)"
-    r"(?:\s+(?:d+o+i+n+g*|d+o+p+i+n+|d+i+o+n+g+|g+o+i+n+g*|b+e+e+n+|t+o+d+a+y+|d+a+y*|f+e+e+l+i+n+g+))?|"
-    r"(?:h+o+w+|h+w+)\s+(?:u+|y+a+|y+o+u+)\s+(?:d+o+i+n+g*|d+o+p+i+n+|d+i+o+n+g+|b+e+e+n+)|"
-    r"h+o+w+'?s\s+(?:i+t\s+g+o+i+n+g*|u+|y+o+u+|e+v+e+r+y+t+h+i+n+g*|(?:y+o+u+r|u+r)\s+d+a+y*)|"
+    r"(?:\s+(?:d+o+i+n+g*|d+o+p+i+n+|d+i+o+n+g+|d+o+|g+o+i+n+g*|b+e+e+n+|t+o+d+a+y+|d+a+y*|f+e+e+l+i+n+g+))?"
+    r"(?:\s+t+o+d+a+y+)?|"
+    r"(?:h+o+w+|h+w+)\s+(?:u+|y+a+|y+o+u+)\s+(?:d+o+i+n+g*|d+o+p+i+n+|d+i+o+n+g+|b+e+e+n+)(?:\s+t+o+d+a+y+)?|"
+    r"h+o+w+'?s\s+(?:i+t\s+g+o+i+n+g*|u+|y+o+u+|e+v+e+r+y+t+h+i+n+g*|(?:y+o+u+r|u+r)\s+d+a+y*)(?:\s+t+o+d+a+y+)?|"
     r"(?:a+r+e+\s+)?(?:y+o+u+|u+)\s+(?:g+o+o+d+|o+k+a*y*|a+l+r+i+g+h+t+)"
-    r")[\s!?.]*$",
+    r")"
+    r"(?:\s+(?:t+o+d+a+y+|r+n+|t+h+e+r+e+|b+r+o+|f+r+i+e+n+d+|s+t+r+a+n+g+e+r+|c+u+t+i+e+))?"
+    r"[\s!?.]*$",
     re.IGNORECASE,
 )
 
-# Blocks all gender words, age/country words, and question traps from hru.txt
+# Words that must NEVER appear in hru.txt (prevents overlap with Class 0, Step 2 Age/Country, or Step 4 Gender)
 HRU_FORBIDDEN_WORDS = frozenset((
-    "m", "f", "w", "male", "female", "famle", "famel", "femael", "femle", "maale", "mael",
-    "girl", "gril", "gurl", "boy", "boi", "man", "woman", "womman", "guy", "lady", "dude",
-    "bro", "gender", "sex", "feminine", "masculine",
-    "old", "age", "from", "country", "live", "where", "what", "whats", "what's",
-    "why", "who", "much", "far", "tall", "many", "long", "price", "cost", "name",
-    "lol", "haha", "tun", "tunisia", "usa", "uk", "india",
+    "old", "olds", "age", "from", "country", "live", "living", "where",
+    "what", "whats", "what's", "why", "who", "which", "much", "far", "tall",
+    "many", "long", "price", "cost", "name", "lol", "haha", "lmao", "rofl",
+    "m", "f", "w", "male", "maale", "mael", "female", "famle", "famel", "femael", "femle",
+    "boy", "boi", "girl", "gril", "gurl", "man", "woman", "womman", "guy", "lady",
+    "gender", "gander", "gnder", "sex", "feminine", "masculine",
+    "tun", "tn", "tunis", "tunisia", "tuinsi", "usa", "uk", "india", "ind", "handi",
 ))
 
 BASE_HRU_PHRASES = (
@@ -67,9 +75,8 @@ GREETING_PREFIXES = (
     "", "hi", "hey", "hello", "yo", "sup", "hii", "heyy", "helloo", "hiya", "howdy",
 )
 
-# Zero gender words in HRU_TARGETS ("bro", "man", "guy" removed)
 HRU_TARGETS = (
-    "", "today", "rn", "there", "friend", "stranger", "cutie",
+    "", "today", "rn", "there", "bro", "friend", "stranger", "cutie",
 )
 
 PUNCTUATION_ENDINGS = ("", "?", "!", "?!", "!!", ".")
@@ -138,6 +145,7 @@ def build_hru_file(output_path="hru.txt"):
     hru_set = set()
     pull_hf_and_jsonl_hru(hru_set)
 
+    # 1. Standalone status / hru phrases + punctuation (!, ?, ?!, !!, .) + targets
     for phrase in BASE_HRU_PHRASES:
         for end in PUNCTUATION_ENDINGS:
             c = is_valid_hru_line(f"{phrase}{end}")
@@ -150,6 +158,7 @@ def build_hru_file(output_path="hru.txt"):
                     if c:
                         hru_set.add(c)
 
+    # 2. Combined Greeting + Status Question (e.g. "hi how r u", "hey hru", "hello how are you doing!")
     for pfx in GREETING_PREFIXES:
         if not pfx:
             continue
@@ -163,11 +172,14 @@ def build_hru_file(output_path="hru.txt"):
                     hru_set.add(c)
 
     sorted_hru = sorted(hru_set)
-    with open(output_path, "w", encoding="ascii") as fh:
-        for line in sorted_hru:
-            fh.write(line + "\n")
+    payload = ("\n".join(sorted_hru) + "\n").encode("ascii", errors="ignore")
+    out_u8 = np.frombuffer(payload, dtype=np.uint8)
+    with open(output_path, "wb") as fh:
+        fh.write(out_u8.tobytes())
 
-    print(f"[CLEAN HRU] Overwrote {len(sorted_hru)} pure ask_how_are_you lines to '{output_path}' (0 gender leaks)", flush=True)
+    n_lines = np.int32(len(sorted_hru))
+    n_kb = np.float32(out_u8.nbytes) / np.float32(1024.0)
+    print(f"[CLEAN HRU] Overwrote {int(n_lines)} pure ask_how_are_you lines to '{output_path}' ({float(n_kb):.2f} KB)", flush=True)
 
 
 if __name__ == "__main__":

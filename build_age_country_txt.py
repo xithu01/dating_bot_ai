@@ -1,10 +1,13 @@
+#!/usr/bin/env python3
 # FILE: build_age_country_txt.py
-# PURPOSE: Build 100% pure ages.txt & countries.txt (Zero gender leaks, zero hru leaks, clean overwrite)
+# PURPOSE: Build 100% pure ages.txt (with lm 24, 24y, 21yres, 20yres) & countries.txt (zero hru/gender contamination)
+# RULES: Enforces zero float64/int64, strict isolation against Step 1, Step 3, and Step 4
 
 import logging
 import os
 import re
 import warnings
+import numpy as np
 
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["HF_HUB_VERBOSITY"] = "error"
@@ -14,23 +17,17 @@ logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
 CLEAN_ASCII_RE = re.compile(r"^[a-z0-9\s'!?.,]+$")
 SPACE_RE = re.compile(r"\s+")
 
-# Blocks any status / "how are you" phrases from polluting ages.txt or countries.txt
-HRU_CONTAMINATION_RE = re.compile(
+# Blocks any status, "how are you", or gender phrases from polluting ages.txt or countries.txt
+CONTAMINATION_RE = re.compile(
     r"\b(?:hru|hyd|doing|doin|going|goin|wbu|hbu|hor|"
     r"how\s+(?:are|r|is|was|have)\s+(?:you|u|ya|it|your|ur)|"
-    r"how\s+(?:u|ya)\s+doin|hows\s+(?:it|u|ur|your)|how's\s+(?:it|u|ur|your))\b",
+    r"how\s+(?:u|ya)\s+doin|hows\s+(?:it|u|ur|your)|how's\s+(?:it|u|ur|your)|"
+    r"m|f|male|female|famle|famel|femael|femle|boy|boi|girl|gril|gurl|man|woman|womman|guy|lady|"
+    r"gender|gand|sex)\b",
     re.IGNORECASE,
 )
 
-# Blocks any gender words or attached age+gender tokens ("22f", "24m", "f22", "m24") from ages.txt & countries.txt
-GENDER_CONTAMINATION_RE = re.compile(
-    r"\b(?:m|f|w|male|female|famle|famel|femael|femle|maale|mael|"
-    r"girl|gril|gurl|boy|boi|man|woman|womman|guy|lady|dude|gender|sex|"
-    r"feminine|masculine|(?:1[0-9]|[2-7][0-9]|80)[mf]|[mf](?:1[0-9]|[2-7][0-9]|80))\b",
-    re.IGNORECASE,
-)
-
-# Curated Country Catalog: (canonical, short codes & phonetic slang, 5+ letter roots for 1-edit typo generation)
+# Curated Country Catalog
 COUNTRY_CATALOG = (
     ("tunisia", ("tun", "tn", "tunis", "tounsi", "tounsia", "tunsia", "tuinsi", "tunisie", "sfax", "sousse"), ("tunisia", "tunisi", "tunisian")),
     ("india", ("ind", "hindi", "handi", "desi", "bharat", "mumbai", "delhi"), ("india", "indian", "hindustan")),
@@ -55,18 +52,15 @@ COUNTRY_CATALOG = (
 
 ENGLISH_COLLISION_BLACKLIST = frozenset((
     "in", "us", "it", "me", "so", "to", "hi", "no", "do", "am", "be", "or", "by", "my",
-    "m", "f", "w", "male", "female", "famle", "famel", "femael", "femle", "maale", "mael",
-    "girl", "gril", "gurl", "boy", "boi", "man", "men", "woman", "women", "womman",
-    "guy", "lady", "dude", "gender", "sex", "feminine", "masculine",
     "hru", "hyd", "hor", "how", "are", "doing", "doin", "going", "goin", "what", "why", "who", "lol",
     "and", "end", "mind", "find", "kind", "wind", "hand", "hind", "band", "land", "sand",
     "pain", "spin", "span", "stain", "train", "chain", "chains", "main", "rain", "gain",
-    "human", "roman", "mail", "mall", "her", "here", "hear", "germs", "dance", "lance",
-    "trance", "turkeys", "idea", "ideal", "nice", "split", "bath", "reading", "mobile",
-    "normal", "lima", "victoria", "grace", "hope", "young", "best", "most", "ware", "deal", "sale", "tours", "angers",
+    "man", "men", "woman", "women", "human", "roman", "male", "mail", "mall", "her",
+    "here", "hear", "germs", "dance", "lance", "trance", "turkeys", "idea", "ideal",
+    "nice", "split", "bath", "reading", "mobile", "normal", "lima", "victoria",
+    "grace", "hope", "young", "best", "most", "ware", "deal", "sale", "tours", "angers",
 ))
 
-# Pure age regex ONLY ("m" and "f" removed so age+gender belongs strictly to Step 4 age_gender.txt)
 STRICT_AGE_CHAT_RE = re.compile(
     r"^(?:"
     r"age\??|ur\s+age\??|your\s+age\??|what(?:'s|\s+is)\s+(?:your|ur)\s+age\??|"
@@ -97,22 +91,18 @@ COUNTRY_QUESTIONS = (
 )
 
 
-def _is_contaminated(s):
-    return bool(HRU_CONTAMINATION_RE.search(s) or GENDER_CONTAMINATION_RE.search(s))
-
-
 def generate_1edit_typos(word):
     out = {word}
     if len(word) < 5:
         return out
     for i in range(1, len(word) - 1):
         swapped = word[:i] + word[i + 1] + word[i] + word[i + 2 :]
-        if swapped not in ENGLISH_COLLISION_BLACKLIST and not _is_contaminated(swapped):
+        if swapped not in ENGLISH_COLLISION_BLACKLIST and not CONTAMINATION_RE.search(swapped):
             out.add(swapped)
     if len(word) >= 6:
         for i in range(1, len(word) - 1):
             dropped = word[:i] + word[i + 1 :]
-            if len(dropped) >= 5 and dropped not in ENGLISH_COLLISION_BLACKLIST and not _is_contaminated(dropped):
+            if len(dropped) >= 5 and dropped not in ENGLISH_COLLISION_BLACKLIST and not CONTAMINATION_RE.search(dropped):
                 out.add(dropped)
     return out
 
@@ -127,9 +117,8 @@ def pull_huggingface_countries_and_cities(country_aliases):
         ds_countries = load_dataset("bamwor/world-countries", split="train")
         for name_raw in ds_countries["name"]:
             w = SPACE_RE.sub(" ", str(name_raw).strip().lower())
-            if w and len(w) <= 18 and w.isalpha() and w not in ENGLISH_COLLISION_BLACKLIST and not _is_contaminated(w):
+            if w and len(w) <= 18 and w.isalpha() and w not in ENGLISH_COLLISION_BLACKLIST:
                 country_aliases.update(generate_1edit_typos(w))
-        print("[HF COUNTRIES] Pulled clean country names from 'bamwor/world-countries'", flush=True)
     except Exception:
         pass
 
@@ -142,9 +131,8 @@ def pull_huggingface_countries_and_cities(country_aliases):
             is_megacity = int(pop_val or 0) >= 1500000
             if is_capital or is_megacity:
                 c_name = str(name_raw).strip().lower()
-                if 4 <= len(c_name) <= 15 and c_name.isalpha() and c_name not in ENGLISH_COLLISION_BLACKLIST and not _is_contaminated(c_name):
+                if 4 <= len(c_name) <= 15 and c_name.isalpha() and c_name not in ENGLISH_COLLISION_BLACKLIST:
                     country_aliases.add(c_name)
-        print("[HF CITIES] Pulled clean capitals & mega-cities from 'bamwor/world-cities'", flush=True)
     except Exception:
         pass
 
@@ -160,12 +148,11 @@ def pull_huggingface_age_and_from_chats(age_lines, country_lines, country_aliase
         re.IGNORECASE,
     )
 
-    chat_repos = (
+    for repo, split, col in (
         ("bavard/personachat_truecased", "train", "history"),
         ("AlekseyKorshuk/persona-chat", "train", "utterances"),
         ("tanaos/synthetic-intent-classifier-dataset-v1", "train", "text"),
-    )
-    for repo, split, col in chat_repos:
+    ):
         try:
             ds = load_dataset(repo, split=split)
             if col not in ds.column_names:
@@ -176,7 +163,7 @@ def pull_huggingface_age_and_from_chats(age_lines, country_lines, country_aliase
                     if not isinstance(raw_s, str):
                         continue
                     s = SPACE_RE.sub(" ", raw_s.strip().lower())
-                    if not s or len(s) > 30 or not CLEAN_ASCII_RE.match(s) or _is_contaminated(s):
+                    if not s or len(s) > 30 or not CLEAN_ASCII_RE.match(s) or CONTAMINATION_RE.search(s):
                         continue
                     if STRICT_AGE_CHAT_RE.match(s):
                         age_lines.add(s.rstrip("!.?"))
@@ -186,7 +173,6 @@ def pull_huggingface_age_and_from_chats(age_lines, country_lines, country_aliase
                         m = inline_loc_re.match(s)
                         if m and m.group(1).lower() in country_aliases:
                             country_lines.add(s.rstrip("!.?"))
-            print(f"[HF DIALOGUES] Extracted clean age/from lines from '{repo}'", flush=True)
         except Exception:
             pass
 
@@ -198,7 +184,6 @@ def build_age_and_country_files(
     neg_path="negatives.txt",
 ):
     age_lines = set(AGE_QUESTIONS)
-    # Pure adult ages (18 to 80) ONLY (no "m" or "f" — combined age+gender is in age_gender.txt)
     for age in range(18, 81):
         age_lines.add(f"{age}")
         age_lines.add(f"im {age}")
@@ -228,7 +213,7 @@ def build_age_and_country_files(
     for canon, short_codes, long_roots in COUNTRY_CATALOG:
         country_aliases.add(canon)
         for sc in short_codes:
-            if sc not in ENGLISH_COLLISION_BLACKLIST and not _is_contaminated(sc):
+            if sc not in ENGLISH_COLLISION_BLACKLIST:
                 country_aliases.add(sc)
         for lr in long_roots:
             country_aliases.update(generate_1edit_typos(lr))
@@ -239,7 +224,7 @@ def build_age_and_country_files(
     pull_huggingface_age_and_from_chats(age_lines, country_lines, country_aliases)
 
     for alias in sorted(country_aliases):
-        if _is_contaminated(alias):
+        if CONTAMINATION_RE.search(alias):
             continue
         country_lines.add(alias)
         country_lines.add(f"from {alias}"[:30])
@@ -253,20 +238,23 @@ def build_age_and_country_files(
         country_lines.add(f"hi l'm 30 from {alias}"[:30])
         country_lines.add(f"hi lm 24 from {alias}"[:30])
 
-    sorted_ages = sorted(s for s in age_lines if not _is_contaminated(s))
-    with open(ages_path, "w", encoding="ascii") as fa:
-        for line in sorted_ages:
-            fa.write(line + "\n")
+    sorted_ages = sorted(s for s in age_lines if not CONTAMINATION_RE.search(s))
+    ages_bytes = ("\n".join(sorted_ages) + "\n").encode("ascii", errors="ignore")
+    ages_u8 = np.frombuffer(ages_bytes, dtype=np.uint8)
+    with open(ages_path, "wb") as fa:
+        fa.write(ages_u8.tobytes())
 
-    sorted_countries = sorted(s for s in country_lines if not _is_contaminated(s))
-    with open(countries_path, "w", encoding="ascii") as fc:
-        for line in sorted_countries:
-            fc.write(line + "\n")
+    sorted_countries = sorted(s for s in country_lines if not CONTAMINATION_RE.search(s))
+    country_bytes = ("\n".join(sorted_countries) + "\n").encode("ascii", errors="ignore")
+    country_u8 = np.frombuffer(country_bytes, dtype=np.uint8)
+    with open(countries_path, "wb") as fc:
+        fc.write(country_u8.tobytes())
 
     all_staged = sorted(set(sorted_ages) | set(sorted_countries))
-    with open(staging_path, "w", encoding="ascii") as fs:
-        for line in all_staged:
-            fs.write(line + "\n")
+    staged_bytes = ("\n".join(all_staged) + "\n").encode("ascii", errors="ignore")
+    staged_u8 = np.frombuffer(staged_bytes, dtype=np.uint8)
+    with open(staging_path, "wb") as fs:
+        fs.write(staged_u8.tobytes())
 
     existing_neg = set()
     if os.path.exists(neg_path):
@@ -280,12 +268,14 @@ def build_age_and_country_files(
         if len(item) <= 30:
             existing_neg.add(item)
 
-    with open(neg_path, "w", encoding="ascii") as fn:
-        for line in sorted(existing_neg):
-            fn.write(line + "\n")
+    neg_bytes = ("\n".join(sorted(existing_neg)) + "\n").encode("ascii", errors="ignore")
+    neg_u8 = np.frombuffer(neg_bytes, dtype=np.uint8)
+    with open(neg_path, "wb") as fn:
+        fn.write(neg_u8.tobytes())
 
-    print(f"[CLEAN AGES] Overwrote {len(sorted_ages)} pure age lines to '{ages_path}' (0 gender/hru leaks)", flush=True)
-    print(f"[CLEAN COUNTRIES] Overwrote {len(sorted_countries)} pure country lines to '{countries_path}' (0 gender/hru leaks)", flush=True)
+    n_ages, n_countries = np.int32(len(sorted_ages)), np.int32(len(sorted_countries))
+    print(f"[CLEAN AGES] Overwrote {int(n_ages)} pure age lines to '{ages_path}' ({ages_u8.nbytes / 1024.0:.2f} KB)", flush=True)
+    print(f"[CLEAN COUNTRIES] Overwrote {int(n_countries)} pure country lines to '{countries_path}' ({country_u8.nbytes / 1024.0:.2f} KB)", flush=True)
 
 
 if __name__ == "__main__":
