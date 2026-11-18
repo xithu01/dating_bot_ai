@@ -1,0 +1,248 @@
+10
+10 boy
+10 f
+10 famle
+10 female
+10 girl
+10 m
+10 male
+10boy
+10f
+10famle
+10female
+10girl
+10m
+10male
+11
+11 boy
+11 f
+11 famle
+11 female
+11 girl
+11 m
+11 male
+11boy
+11f
+11famle
+11female
+11girl
+11m
+11male
+12
+12 boy
+12 f
+12 famle
+12 female
+12 girl
+12 m
+12 male
+12boy
+12f
+12famle
+12female
+12girl
+12m
+12male
+13
+13 boy
+13 f
+13 famle
+13 female
+13 girl
+13 m
+13 male
+13boy
+13f
+13famle
+13female
+13girl
+13m
+13male
+14
+14 boy
+14 f
+14 famle
+14 female
+14 girl
+14 m
+14 male
+14boy
+14f
+14famle
+14female
+14girl
+14m
+14male
+15
+15 boy
+15 f
+15 famle
+15 female
+15 girl
+15 m
+15 male
+15boy
+15f
+15famle
+15female
+15girl
+15m
+15male
+16
+16 boy
+16 f
+16 famle
+16 female
+16 girl
+16 m
+16 male
+16boy
+16f
+16famle
+16female
+16girl
+16m
+16male
+17
+17 boy
+17 f
+17 famle
+17 female
+17 girl
+17 m
+17 male
+17boy
+17f
+17famle
+17female
+17girl
+17m
+17male
+boy 10
+boy 11
+boy 12
+boy 13
+boy 14
+boy 15
+boy 16
+boy 17
+f 10
+f 11
+f 12
+f 13
+f 14
+f 15
+f 16
+f 17
+famle 10
+famle 11
+famle 12
+famle 13
+famle 14
+famle 15
+famle 16
+famle 17
+female 10
+female 11
+female 12
+female 13
+female 14
+female 15
+female 16
+female 17
+girl 10
+girl 11
+girl 12
+girl 13
+girl 14
+girl 15
+girl 16
+girl 17
+i am 10
+i am 11
+i am 12
+i am 13
+i am 14
+i am 15
+i am 16
+i am 17
+im 10
+im 10 boy
+im 10 f
+im 10 famle
+im 10 female
+im 10 girl
+im 10 m
+im 10 male
+im 11
+im 11 boy
+im 11 f
+im 11 famle
+im 11 female
+im 11 girl
+im 11 m
+im 11 male
+im 12
+im 12 boy
+im 12 f
+im 12 famle
+im 12 female
+im 12 girl
+im 12 m
+im 12 male
+im 13
+im 13 boy
+im 13 f
+im 13 famle
+im 13 female
+im 13 girl
+im 13 m
+im 13 male
+im 14
+im 14 boy
+im 14 f
+im 14 famle
+im 14 female
+im 14 girl
+im 14 m
+im 14 male
+im 15
+im 15 boy
+im 15 f
+im 15 famle
+im 15 female
+im 15 girl
+im 15 m
+im 15 male
+im 16
+im 16 boy
+im 16 f
+im 16 famle
+im 16 female
+im 16 girl
+im 16 m
+im 16 male
+im 17
+im 17 boy
+im 17 f
+im 17 famle
+im 17 female
+im 17 girl
+im 17 m
+im 17 male
+m 10
+m 11
+m 12
+m 13
+m 14
+m 15
+m 16
+m 17
+male 10
+male 11
+male 12
+male 13
+male 14
+male 15
+male 16
+male 17

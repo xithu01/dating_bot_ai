@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # FILE: production_server_part2.py
-# PURPOSE: Step 1-4 Routing Engine & Response Pools (Gender Yes/No, Double-Memory, CACHED HTTP)
+# PURPOSE: Step 1-7 Routing Engine & Response Pools (Gender Yes/No, Double-Memory, Flirt/React, CACHED HTTP)
 # RULES: Zero PyTorch/SciPy/DB, zero float64/int64, PyArmor compatible (< 400 lines / < 18 KB)
 
 import asyncio
@@ -18,7 +18,8 @@ FLAG_ASKED_HRU = 8
 FLAG_ASKED_GENDER = 16
 FLAG_ASKED_WYD = 32
 FLAG_TOLD_STATUS = 64
-FLAG_ASKED_WYD = 32
+FLAG_FLIRTED = 128
+
 _VALID_SINGLE_GREETING_WORDS = (
     "hi", "hey", "helo", "hlo", "hy", "hie", "hei", "hiya", "heya", "hulo", "elo",
     "yo", "sup", "wasup", "wazup", "whazup", "howdy", "gretings", "greeting",
@@ -221,9 +222,6 @@ CACHED_GENDER_YES_M_POOL = _make_pool(
     '["im F","im M","im 22"]',
 )
 
-# --- STEP 4: GENDER & YES/NO SYSTEM (CLASS 9..14 — Strictly 8 items per pool) ---
-
-# User is Female (Class 12) -> Bot replies with its own gender
 CACHED_TELL_GENDER_F_BOT_F_POOL = _make_pool(
     12, "false", "state_gender_female",
     ("im F too! how old r u?", "girl here too! ur age?", "same, female here :) how old r u?", "im a girl too! age and where u from?", "F too! how old r u?", "same here :) what country u from?", "im F too, im 22, how old r u?", "girl here too! how old are u?"),
@@ -236,7 +234,6 @@ CACHED_TELL_GENDER_F_BOT_M_POOL = _make_pool(
     '["im 21","im 24","from usa"]',
 )
 
-# User is Male (Class 13) -> Bot replies with its own gender
 CACHED_TELL_GENDER_M_BOT_F_POOL = _make_pool(
     13, "false", "state_gender_male",
     ("im F! how old r u?", "girl here! ur age?", "female here :) how old r u?", "im a girl! age and where u from?", "F here! how old r u?", "im a girl :) what country u from?", "im F, im 22, how old r u?", "girl here! how old are u?"),
@@ -248,20 +245,27 @@ CACHED_TELL_GENDER_M_BOT_M_POOL = _make_pool(
     ("im M too! how old r u?", "guy here too! ur age?", "same, male here :) how old r u?", "im a guy too! age and where u from?", "M too! how old r u?", "same here :) what country u from?", "im M too, im 23, how old r u?", "guy here too! how old are u?"),
     '["im 21","im 24","from usa"]',
 )
+
+CACHED_TELL_AGE_GENDER_POOL = _make_pool(
+    14, "false", "state_age_and_gender",
+    ("nice! im 22, where r u from?", "cool! 22 here, what country u from?", "sweet! where u from?", "ooh nice! im 23, where u live?", "awesome! im 22, u from?", "nice age! where r u from?", "cool :) im 22, what country?", "sweet! im 23, where u from?"),
+    '["usa","uk","tunisia"]',
+)
+
 # --- STEP 5: ASK WHAT ARE YOU DOING / WYD (CLASS 15 — 8 items per pool) ---
 CACHED_ASK_WYD_POOL = _make_pool(
     15, "false", "ask_wyd",
     (
-        "I'm good, just chilling in bed! u?",
-        "Just chilling in bed, wbu?",
-        "Nothing much, just bored lol, u?",
-        "Doing good! just relaxing, what u up to?",
+        "just chilling in bed, wbu?",
+        "nothing much, just bored lol, u?",
+        "doing good! just relaxing, what u up to?",
         "just chilling listening to music, wbu?",
         "not much, just laying in bed :) u?",
         "just scrolling on my phone lol, wbu?",
+        "chilling at home, what are u doing?",
         "nothing much, just bored! what u up to?",
     ),
-    '["chilling too","nothing much","im bored"]',
+    '["chilling too","nothing much","in bed"]',
 )
 
 CACHED_REPEAT_ASK_WYD_POOL = _make_pool(
@@ -354,41 +358,68 @@ CACHED_STATUS_ASK_BACK_POOL = _make_pool(
     ),
     '["im 22","from usa","24 m"]',
 )
-CACHED_TELL_AGE_GENDER_POOL = _make_pool(
-    14, "false", "state_age_and_gender",
-    ("nice! im 22, where r u from?", "cool! 22 here, what country u from?", "sweet! where u from?", "ooh nice! im 23, where u live?", "awesome! im 22, u from?", "nice age! where r u from?", "cool :) im 22, what country?", "sweet! im 23, where u from?"),
-    '["usa","uk","tunisia"]',
-)
-# --- STEP 5: ASK WHAT ARE YOU DOING / WYD (CLASS 15 — 8 items per pool) ---
-CACHED_ASK_WYD_POOL = _make_pool(
-    15, "false", "ask_wyd",
+
+# --- STEP 7: COMPLIMENTS/FLIRT (CLASS 19) & SHORT REACTIONS/ACK (CLASS 20) ---
+CACHED_COMPLIMENT_FLIRT_POOL = _make_pool(
+    19, "false", "compliment_flirt",
     (
-        "just chilling in bed, wbu?",
-        "nothing much, just bored lol, u?",
-        "doing good! just relaxing, what u up to?",
-        "just chilling listening to music, wbu?",
-        "not much, just laying in bed :) u?",
-        "just scrolling on my phone lol, wbu?",
-        "chilling at home, what are u doing?",
-        "nothing much, just bored! what u up to?",
+        "aw thank u! ur sweet :) how old r u?",
+        "haha stop ur making me blush! where r u from?",
+        "aw thanks cutie! how old r u and where u from?",
+        "thank u :) u seem really cool too! ur age?",
+        "aw thats so sweet! where r u from?",
+        "haha thank u! i like talking to u too, how old r u?",
+        "aw ur making me smile :) what country u from?",
+        "thanks cutie :) how old r u and where u from?",
     ),
-    '["chilling too","nothing much","in bed"]',
+    '["im 22","from usa","24 m"]',
 )
 
-CACHED_REPEAT_ASK_WYD_POOL = _make_pool(
-    15, "false", "ask_wyd_repeat",
+CACHED_COMPLIMENT_FLIRT_COMPLETE_POOL = _make_pool(
+    19, "false", "compliment_flirt_complete",
     (
-        "haha still just chilling in bed! u?",
-        "still bored lol, nothing changed! wbu?",
-        "haha told u, just relaxing! what u up to?",
-        "still laying in bed lol :) u?",
-        "haha same thing, just chilling! wbu?",
-        "still doing nothing much lol! u?",
-        "haha still scrolling on my phone, wbu?",
-        "still chilling at home :) what about u?",
+        "aw thank u! ur making me blush :)",
+        "haha thanks cutie! u seem really sweet too",
+        "aw i like talking to u too! what u up to?",
+        "thank u :) ur pretty cute yourself!",
+        "aw thats so sweet of u to say :)",
+        "haha stop ur making me smile! wyd rn?",
+        "thanks cutie :) love ur vibe too!",
+        "aw thank u! ur my type too haha :)",
     ),
-    '["haha nice","same here"]',
+    '["haha thanks","wyd?","ur sweet"]',
 )
+
+CACHED_REACT_ACK_POOL = _make_pool(
+    20, "false", "short_reaction_ack",
+    (
+        "haha yeah! btw how old r u?",
+        "ik right :) where r u from?",
+        "haha for real! what's ur age and country?",
+        "glad we agree :) how old r u?",
+        "haha ikr! where u from btw?",
+        "sweet :) how old are u and where u from?",
+        "haha true! what country u in?",
+        "nice :) btw how old r u?",
+    ),
+    '["im 22","from usa","24 m"]',
+)
+
+CACHED_REACT_ACK_COMPLETE_POOL = _make_pool(
+    20, "false", "short_reaction_ack_complete",
+    (
+        "haha ikr! so what u up to rn?",
+        "glad we vibe :) what do u like doing for fun?",
+        "haha for real! having a good day?",
+        "ikr :) ur fun to talk to!",
+        "haha yeah! chilling in bed here, wbu?",
+        "totally :) love ur vibe!",
+        "haha true! what r u up to today?",
+        "nice :) u seem really chill!",
+    ),
+    '["just chilling","wyd?","thanks!"]',
+)
+
 
 def _build_step1_bloom_tables(w_poly_mat, s2_frame_bloom):
     word_bloom = np.zeros((BLOOM_SIZE,), dtype=np.int8)
@@ -547,6 +578,7 @@ def handle_user_query(model, slot, users, uid, mv_payload, forward_pass_fn):
     if class_id == 14:
         users.conv_flags[uid] = np.uint8(flags | FLAG_GREETED)
         return CACHED_AGE_COMPLETE_POOL[rot8] if prev_country > 0 else CACHED_TELL_AGE_GENDER_POOL[rot8]
+
     if class_id == 15:
         already_asked_wyd = (flags & FLAG_ASKED_WYD) != 0
         users.conv_flags[uid] = np.uint8(flags | FLAG_GREETED | FLAG_ASKED_WYD)
@@ -563,7 +595,15 @@ def handle_user_query(model, slot, users, uid, mv_payload, forward_pass_fn):
     if class_id == 18:
         users.conv_flags[uid] = np.uint8(flags | FLAG_GREETED | FLAG_TOLD_STATUS)
         return CACHED_STATUS_ASK_BACK_POOL[rot8]
-   
+
+    if class_id == 19:
+        users.conv_flags[uid] = np.uint8(flags | FLAG_GREETED | FLAG_FLIRTED)
+        return CACHED_COMPLIMENT_FLIRT_COMPLETE_POOL[rot8] if (prev_age >= 18 and prev_country > 0) else CACHED_COMPLIMENT_FLIRT_POOL[rot8]
+
+    if class_id == 20:
+        users.conv_flags[uid] = np.uint8(flags | FLAG_GREETED)
+        return CACHED_REACT_ACK_COMPLETE_POOL[rot8] if (prev_age >= 18 and prev_country > 0) else CACHED_REACT_ACK_POOL[rot8]
+
     return CACHED_REJECT_RESPONSE
 
 

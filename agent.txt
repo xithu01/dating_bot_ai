@@ -151,6 +151,17 @@ from google.colab import files
 files.download(drive_weights)
 
 
+Before I write the code (so we don't waste your daily token limit), please tell me which exact topic/intent you want for Step 7:
+Compliments, Flirting & Short Reactions (Classes 19–20):
+e.g., "ur cute", "u seem nice", "i like u" + conversational reactions ("haha", "lol", "nice", "cool", "same", "true", "ok").
+Ask / State "What Are You Looking For?" (Classes 19–20):
+e.g., "what r u looking for?", "why r u on here?", "looking for friends or dating?" + "just chatting", "looking for a gf/bf", "making friends".
+Ask / Tell Name (Classes 19–20):
+e.g., "whats ur name?", "name?", "what should i call u?" (Persona-aware: Bot F = Emma/Sarah, Bot M = Alex/Liam).
+Hobbies & Interests Follow-Up (Classes 19–20):
+e.g., "what music do u like?", "what games u play?", "what movie r u watching?", "what r ur hobbies?".
+Something else? (Just type the exact phrases/classes you want for Step 7).
+Reply with 1, 2, 3, 4, or your custom Step 7 idea, and I will immediately output File 1!
 ***********
 
 !python build_greetings_txt.py
@@ -170,3 +181,11 @@ python offline_train.py --step1
 
 !python build_wyd_txt.py
 !python offline_train.py --step5
+
+
+!python build_status_txt.py
+!python offline_train.py --step6
+
+
+!python build_flirt_react_txt.py
+!python offline_train.py --step7

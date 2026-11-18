@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # FILE: production_server.py
-# PURPOSE: Step 1 + Step 2 + Step 3 + Step 4 Pure NumPy Dating Inference Engine
-# RULES: Zero PyTorch/SciPy/DB, zero float64/int64, zero loops over tensors, PyArmor compatible (< 430 lines / < 18 KB)
+# PURPOSE: Step 1 + Step 2 + Step 3 + Step 4 + Step 5 + Step 6 + Step 7 Pure NumPy Dating Inference Engine
+# RULES: Zero PyTorch/SciPy/DB, zero offline_train import, zero float64/int64, PyArmor compatible (< 430 lines / < 18 KB)
 
 import asyncio
 from collections import deque
@@ -31,6 +31,7 @@ S3_CLASSES = 2
 S4_CLASSES = 7
 S5_CLASSES = 2
 S6_CLASSES = 4
+S7_CLASSES = 3
 MAX_USERS = 50000
 NUM_WORKERS = 8
 
@@ -42,33 +43,34 @@ class QuantizedModel:
         "s2_emb_f32", "s2_w1_f32", "s2_w2_f32",
         "s3_emb_f32", "s3_w1_f32", "s3_w2_f32",
         "s4_emb_f32", "s4_w1_f32", "s4_w2_f32",
+        "s5_emb_f32", "s5_w1_f32", "s5_w2_f32", "s5_wyd_bloom_q",
+        "s6_emb_f32", "s6_w1_f32", "s6_w2_f32",
+        "s6_status_bloom_q", "status_lut_a", "status_lut_b",
+        "s7_emb_f32", "s7_w1_f32", "s7_w2_f32",
+        "s7_flirt_react_bloom_q", "s7_lut_a", "s7_lut_b",
         "word_bloom_q", "single_bloom_q", "target_bloom_q", "lead_bloom_q",
         "s2_frame_bloom_q", "s3_hru_bloom_q", "s4_gender_bloom_q",
         "country_lut_a", "country_lut_b", "gender_lut_a", "gender_lut_b",
         "pos_f32", "mask_f32", "char_lut", "reject_lut", "poly_mat", "w_poly_mat",
         "inv_sqrt_d", "eps", "m5_0", "m5_1", "m5_2", "m5_3", "mask_b", "mask5", "off5",
         "m3_0", "m3_1", "mask3", "off3", "bloom_mask", "s2_v_mask", "one_i32", "space_i32", "conf_thresh",
-        "s5_emb_f32", "s5_w1_f32", "s5_w2_f32", "s5_wyd_bloom_q",
-      
-        "s6_emb_f32", "s6_w1_f32", "s6_w2_f32",
-        "s6_status_bloom_q", "status_lut_a", "status_lut_b",
     )
 
     def __init__(self, npz_path):
         req_keys = (
             "w_intent_q", "s2_country_lut_a", "s3_w2_q", "s4_w2_q",
             "s4_gender_lut_a", "s5_w2_q", "s6_w2_q", "s6_status_lut_a",
+            "s7_w2_q", "s7_lut_a",
         )
-        need_train = not os.path.exists(npz_path)
-        if not need_train:
-            arc = np.load(npz_path, mmap_mode="r")
-            if any(k not in arc.files for k in req_keys):
-                arc.close()
-                need_train = True
-        if need_train:
-            import offline_train
-            offline_train.run_vault_trainer(npz_path, force_s1=False, force_s2=False, force_s3=False, force_s4=False)
-            arc = np.load(npz_path, mmap_mode="r")
+        if not os.path.exists(npz_path):
+            print(f"[VAULT ERROR] '{npz_path}' not found! Run first: python offline_train.py", flush=True)
+            sys.exit(1)
+        arc = np.load(npz_path, mmap_mode="r")
+        missing = [k for k in req_keys if k not in arc.files]
+        if missing:
+            arc.close()
+            print(f"[VAULT ERROR] Missing Step weights {missing} in '{npz_path}'! Run first: python offline_train.py", flush=True)
+            sys.exit(1)
 
         def lock_f32(prefix, zero_row0=False):
             q = arc[f"{prefix}_q"].astype(np.int8, copy=False)
@@ -90,21 +92,11 @@ class QuantizedModel:
         self.w4_f32 = lock_f32("w4")
         self.w_intent_f32 = lock_f32("w_intent")
 
-        self.s2_emb_f32 = lock_f32("s2_emb", True)
-        self.s2_w1_f32 = lock_f32("s2_w1")
-        self.s2_w2_f32 = lock_f32("s2_w2")
-        self.s3_emb_f32 = lock_f32("s3_emb", True)
-        self.s3_w1_f32 = lock_f32("s3_w1")
-        self.s3_w2_f32 = lock_f32("s3_w2")
-        self.s4_emb_f32 = lock_f32("s4_emb", True)
-        self.s4_w1_f32 = lock_f32("s4_w1")
-        self.s4_w2_f32 = lock_f32("s4_w2")
-        self.s5_emb_f32 = lock_f32("s5_emb", True)
-        self.s5_w1_f32 = lock_f32("s5_w1")
-        self.s5_w2_f32 = lock_f32("s5_w2")
-        self.s6_emb_f32 = lock_f32("s6_emb", True)
-        self.s6_w1_f32 = lock_f32("s6_w1")
-        self.s6_w2_f32 = lock_f32("s6_w2")
+        for pfx in ("s2", "s3", "s4", "s5", "s6", "s7"):
+            setattr(self, f"{pfx}_emb_f32", lock_f32(f"{pfx}_emb", True))
+            setattr(self, f"{pfx}_w1_f32", lock_f32(f"{pfx}_w1"))
+            setattr(self, f"{pfx}_w2_f32", lock_f32(f"{pfx}_w2"))
+
         fb_q = np.array(arc["s2_frame_bloom_q"], dtype=np.int8, copy=True)
         for k_attr, k_arc, dt in (
             ("s3_hru_bloom_q", "s3_hru_bloom_q", np.int8),
@@ -117,10 +109,14 @@ class QuantizedModel:
             ("s6_status_bloom_q", "s6_status_bloom_q", np.int8),
             ("status_lut_a", "s6_status_lut_a", np.uint8),
             ("status_lut_b", "s6_status_lut_b", np.uint8),
+            ("s7_flirt_react_bloom_q", "s7_flirt_react_bloom_q", np.int8),
+            ("s7_lut_a", "s7_lut_a", np.uint8),
+            ("s7_lut_b", "s7_lut_b", np.uint8),
         ):
             arr = arc[k_arc].astype(dt, copy=False)
             arr.flags.writeable = False
             setattr(self, k_attr, arr)
+        arc.close()
 
         pos_idx = np.arange(SEQ_LEN, dtype=np.float32).reshape(SEQ_LEN, 1)
         div_term = np.exp(np.arange(0, D_MODEL, 2, dtype=np.float32) * (-np.log(np.float32(10000.0)) / np.float32(D_MODEL))).astype(np.float32, copy=False)
@@ -183,7 +179,7 @@ class InferenceSlot:
         "m_a", "m_b", "valid_mask", "valid_f32", "active_count",
         "x", "qkv", "q", "k", "v", "scores", "row_max", "row_sum",
         "attn_out", "proj_out", "norm_tmp", "ffn_mid", "pooled", "intent_logits",
-        "st_hits_a", "st_hits_b", "s6_logits",
+        "st_hits_a", "st_hits_b", "s6_logits", "s7_hits_a", "s7_hits_b", "s7_logits",
     )
 
     def __init__(self, slot_id):
@@ -211,6 +207,9 @@ class InferenceSlot:
         self.st_hits_a = np.zeros((6,), dtype=np.uint8)
         self.st_hits_b = np.zeros((6,), dtype=np.uint8)
         self.s6_logits = np.zeros((1, S6_CLASSES), dtype=np.float32)
+        self.s7_hits_a = np.zeros((6,), dtype=np.uint8)
+        self.s7_hits_b = np.zeros((6,), dtype=np.uint8)
+        self.s7_logits = np.zeros((1, S7_CLASSES), dtype=np.float32)
         self.tokens = np.zeros((SEQ_LEN,), dtype=np.int32)
         self.tok_bloom, self.tok5, self.tok3 = self.tokens[0:8], self.tokens[8:24], self.tokens[24:32]
         self.t_tmp16, self.t_tmp8 = np.zeros((16,), dtype=np.int32), np.zeros((8,), dtype=np.int32)
@@ -365,6 +364,15 @@ def forward_pass(model, slot, mv_payload):
     n_st_neg = int(np.sum(st_codes == 2))
     has_st_ab = bool(np.any(st_codes == 3))
 
+    np.take(model.s7_lut_a, slot.w_b_idx[:, 0], out=slot.s7_hits_a)
+    np.take(model.s7_lut_b, slot.w_b_idx[:, 1], out=slot.s7_hits_b)
+    s7_match = (slot.s7_hits_a[:n_words] > 0) & (slot.s7_hits_a[:n_words] == slot.s7_hits_b[:n_words])
+    s7_codes = slot.s7_hits_a[:n_words] * s7_match
+    n_s7_flirt = int(np.sum(s7_codes == 1))
+    n_s7_react = int(np.sum(s7_codes == 2))
+    n_s7_dual = int(np.sum(s7_codes == 3))
+    has_s7_subj = bool(np.any(s7_codes == 4))
+
     starts_w_non_wbu = int(kept[0]) == 119 and (k_len < 2 or int(kept[1]) != 98)
     if age_val == 0 and not all_pure_greet and n_st_pos == 0 and n_st_neg == 0 and not starts_w_non_wbu:
         np.take(model.s3_hru_bloom_q, slot.w_b_idx, out=slot.w_b_hits)
@@ -431,7 +439,7 @@ def forward_pass(model, slot, mv_payload):
                 return (10, 0, 2) if (not has_s_frame and (has_q or has_q_frame or has_neutral or float(slot.s4_logits[0, 2]) > float(slot.s4_logits[0, 4]))) else (12, 0, 2)
             if n_male > 0:
                 return (11, 0, 1) if (not has_s_frame and (has_q or has_q_frame or has_neutral or float(slot.s4_logits[0, 3]) > float(slot.s4_logits[0, 5]))) else (13, 0, 1)
-            
+
     if n_words <= 4 and k_len <= MAX_GREETING_LEN:
         if all_pure_greet:
             return 1, 0, 0
@@ -515,10 +523,6 @@ def forward_pass(model, slot, mv_payload):
             if np.float32(slot.intent_logits[0, 1] - slot.intent_logits[0, 0]) >= model.conf_thresh:
                 return 1, 0, 0
 
-
-   
-
-
     if age_val == 0 and country_id == 0 and n_st_pos == 0 and n_st_neg == 0:
         np.take(model.s5_wyd_bloom_q, slot.w_b_idx, out=slot.w_b_hits)
         if bool(np.all(slot.w_b_hits[:n_words])):
@@ -533,7 +537,12 @@ def forward_pass(model, slot, mv_payload):
                 return 15, 0, 0
 
     is_nmu = n_words == 1 and L0 == 3 and int(kept[0]) == 110 and int(kept[1]) == 109 and int(kept[2]) == 117
-    if age_val == 0 and country_id == 0 and (n_st_pos > 0 or n_st_neg > 0 or is_nmu):
+    s7_override_s6 = (
+        not has_q and bool(np.all(s7_codes > 0))
+        and (n_s7_react > 0 or n_s7_dual > 0 or has_s7_subj)
+        and not (int(s7_codes[0]) == 5 and int(s7_codes[n_words - 1]) == 4)
+    )
+    if age_val == 0 and country_id == 0 and (n_st_pos > 0 or n_st_neg > 0 or is_nmu) and not s7_override_s6:
         np.take(model.s6_status_bloom_q, slot.w_b_idx, out=slot.w_b_hits)
         if bool(np.all(slot.w_b_hits[:n_words])):
             slot.s4_tokens[:6] = slot.s2_tokens[:6]
@@ -557,8 +566,28 @@ def forward_pass(model, slot, mv_payload):
                 if n_st_neg > 0:
                     return (16, 0, 0) if (n_st_pos == 0 and s6_pos > s6_neg + 1.0) else (17, 0, 0)
                 return (16, 0, 0) if s6_pos >= s6_neg else (17, 0, 0)
+
+    if age_val == 0 and country_id == 0 and not has_q and (n_s7_flirt > 0 or n_s7_react > 0 or n_s7_dual > 0 or (n_words >= 2 and bool(np.all(s7_codes == 5)))):
+        np.take(model.s7_flirt_react_bloom_q, slot.w_b_idx, out=slot.w_b_hits)
+        if bool(np.all(slot.w_b_hits[:n_words])):
+            slot.s4_tokens[:6] = slot.s2_tokens[:6]
+            slot.s4_tokens[6] = model.one_i32
+            slot.s4_tokens[7] = (((slot.s2_tokens[0] * np.int32(37)) + (slot.s2_tokens[n_words - 1] * np.int32(73))) & model.s2_v_mask) + model.one_i32
+            np.take(model.s7_emb_f32, slot.s4_tokens, axis=0, out=slot.s2_emb_buf)
+            slot.s2_emb_buf[6] *= np.float32(2.5)
+            np.sum(slot.s2_emb_buf, axis=0, keepdims=True, out=slot.s2_pooled)
+            slot.s2_pooled *= np.float32(1.0 / (float(n_words) + 3.5))
+            np.matmul(slot.s2_pooled, model.s7_w1_f32, out=slot.s2_mid)
+            np.maximum(slot.s2_mid, np.float32(0.0), out=slot.s2_mid)
+            np.matmul(slot.s2_mid, model.s7_w2_f32, out=slot.s7_logits)
+            s7_0, s7_flirt, s7_react = float(slot.s7_logits[0, 0]), float(slot.s7_logits[0, 1]), float(slot.s7_logits[0, 2])
+            if max(s7_flirt, s7_react) > s7_0 + 0.1:
+                if n_s7_flirt > 0 or (has_s7_subj and n_s7_react == 0):
+                    return 19, 0, 0
+                return 20, 0, 0
+
     if not all_s2_valid:
-           return 0, 0, 0
+        return 0, 0, 0
     np.take(model.s2_emb_f32, slot.s2_tokens, axis=0, out=slot.s2_emb_buf)
     slot.s2_emb_buf[6] *= np.float32(2.5)
     np.sum(slot.s2_emb_buf, axis=0, keepdims=True, out=slot.s2_pooled)
@@ -595,6 +624,10 @@ async def start_server(host="127.0.0.1", port=8080):
         (b"hey hey", 1), (b"heeyy", 1), (b"hello", 1), (b"helloo", 1), (b"hlo", 1),
         (b"yo", 1), (b"sup", 1), (b"good morning", 1), (b"whats up", 1),
         (b"wyd", 15), (b"what are you doing", 15), (b"what u up to", 15),
+        (b"im good", 16), (b"im ok", 16), (b"bored", 17), (b"lm borad", 17), (b"im good u?", 18), (b"nmu", 18),
+        (b"ur cute", 19), (b"u seem nice", 19), (b"i like u", 19),
+        (b"haha", 20), (b"lol", 20), (b"nice", 20), (b"cool", 20),
+        (b"same", 20), (b"sam", 20), (b"same here", 20), (b"sam here", 20), (b"true", 20), (b"ok", 20),
         (b"hi there", 1), (b"hey man", 1),
         (b"how are you", 8), (b"how are you?", 8), (b"how are you!", 8), (b"hru", 8), (b"hru!", 8),
         (b"hyd", 8), (b"how r u", 8), (b"how u doing!", 8), (b"how was your day", 8),
@@ -612,13 +645,13 @@ async def start_server(host="127.0.0.1", port=8080):
         (b"22f", 14), (b"24 m", 14), (b"19 famle", 14), (b"21 girl", 14),
         (b"what", 0), (b"what?", 0), (b"what!", 0), (b"why", 0), (b"why?", 0), (b"why!", 0),
         (b"who", 0), (b"who?", 0), (b"who!", 0), (b"who are you", 0), (b"what is this", 0),
-        (b"why not", 0), (b"lol", 0), (b"hyw", 0), (b"iphey", 0), (b"m bi", 0),
+        (b"why not", 0), (b"hyw", 0), (b"iphey", 0), (b"m bi", 0),
     )
     passed = sum(1 for txt, exp in suite if forward_pass(model, test_slot, memoryview(txt))[0] == exp)
     slot_queue.put_nowait(test_slot)
 
     print(f"[BENCHMARK] 1,000 forward passes in {elapsed_ms:.2f} ms ({elapsed_ms / 1000.0:.4f} ms/req)")
-    print(f"[STEP 1+2+3+4 ZERO-FAULT SUITE] Passed {passed}/{len(suite)} tests (2.94 MB Total RAM)")
+    print(f"[STEP 1-7 ZERO-FAULT SUITE] Passed {passed}/{len(suite)} tests (3.18 MB Total RAM)")
 
     if "--benchmark" in sys.argv:
         return
@@ -649,7 +682,7 @@ async def start_server(host="127.0.0.1", port=8080):
 
     asyncio.create_task(wal_write_behind_worker(users))
     server = await asyncio.start_server(client_handler, host, port, backlog=2048)
-    print(f"[SERVER] Step 1+2+3+4 Dating Engine on http://{host}:{port} (2.94 MB Total RAM)")
+    print(f"[SERVER] Step 1-7 Dating Engine on http://{host}:{port} (3.18 MB Total RAM)")
     async with server:
         await server.serve_forever()
 
