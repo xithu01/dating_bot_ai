@@ -10,6 +10,7 @@ import sys
 import time
 import numpy as np
 from step8_looking_for import forward_step8, get_step8_engine
+from step9_name import forward_step9, get_step9_engine
 from production_server_part2 import (
     _build_step1_bloom_tables,
     handle_user_query,
@@ -168,6 +169,7 @@ class QuantizedModel:
         self.bloom_mask, self.s2_v_mask = np.int32(BLOOM_SIZE - 1), np.int32(S2_VOCAB - 2)
         self.one_i32, self.space_i32, self.conf_thresh = np.int32(1), np.int32(32), np.float32(0.5)
         get_step8_engine(npz_path)
+        get_step9_engine(npz_path)
 
 
 class InferenceSlot:
@@ -589,6 +591,9 @@ def forward_pass(model, slot, mv_payload):
     s8_cid, s8_age, s8_aux = forward_step8(model, slot, n_words, has_q, age_val, country_id)
     if s8_cid != 0:
         return s8_cid, s8_age, s8_aux
+    s9_cid, s9_age, s9_aux = forward_step9(model, slot, n_words, has_q, age_val, country_id)
+    if s9_cid != 0:
+        return s9_cid, s9_age, s9_aux
     if not all_s2_valid:
         return 0, 0, 0
     np.take(model.s2_emb_f32, slot.s2_tokens, axis=0, out=slot.s2_emb_buf)

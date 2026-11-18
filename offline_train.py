@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 # FILE: offline_train.py
-# PURPOSE: Unified Step 1, 2, 3, 4, 5, 6 & 7 Vault Trainer (Zero-Leak Negative Filtering + Self-Healing Datasets)
-# RULES: Enforces Rules 1-11 (Zero float64/int64, 1s ETA, RAM Super-Arena, Full Vault Protection)
-# NOTE: PyArmor line limits apply ONLY to production_server.py & production_server_part2.py per System Rule 7.
+# PURPOSE: Unified Step 1, 2, 3, 4, 5, 6, 7 & 8 Vault Trainer (Enforces Rules 1-13)
+# SECURITY:
+#   - Rule 12 Cryptographic SHA-256 Vault Integrity Lock (verifies all untouched steps before & after saving)
+#   - Rule 12 Closed-Vocabulary Whitelist Gate (blocks unknown words from poisoning Bloom filters in .npz)
+#   - Rule 13 Zero False Saves & Canonical Deduplication (explicitly traps "a bf here", "a gf here", etc.)
 
+import hashlib
 import logging
 import os
 import re
@@ -16,6 +19,7 @@ import torch.nn.functional as F
 
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["HF_HUB_VERBOSITY"] = "error"
+os.environ["HF_DATASETS_TRUST_REMOTE_CODE"] = "0"
 warnings.filterwarnings("ignore")
 logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
 
@@ -46,6 +50,7 @@ S4_CLASSES = 7  # 0=Reject, 1=Choice(9), 2=IsFemale(10), 3=IsMale(11), 4=StateFe
 S5_CLASSES = 2  # 0=Reject, 1=AskWYD(15)
 S6_CLASSES = 4  # 0=Reject, 1=StatusPos(16), 2=StatusNeg(17), 3=StatusAskBack(18)
 S7_CLASSES = 3  # 0=Reject, 1=ComplimentFlirt(19), 2=ShortReactionAck(20)
+S8_CLASSES = 3  # 0=Reject, 1=AskLookingFor(21), 2=StateLookingFor(22)
 BATCH_SIZE = 512
 
 CLEAN_RE = re.compile(r"^[a-z\s'!?.,/]+$")
@@ -87,21 +92,27 @@ BUILTIN_GREETINGS = CORE_SHORT_GREETINGS + (
 )
 
 QUESTION_AND_REACTION_TRAPS = (
-    "what", "what?", "what!", "what?!", "what!!", "what is this", "what is this?", "what is that",
+    "what", "what?", "what!", "what is this", "what is this?", "what is that",
     "what do you want", "what time is it", "what do you do", "what is your name", "ur name?",
-    "why", "why?", "why!", "why?!", "why!!", "why not", "why not?", "why not!", "why me",
-    "who", "who?", "who!", "who?!", "who!!", "who are you", "who are you?", "who is this",
-    "who r u", "who is that", "lol", "lol!", "lol?", "haha", "haha!", "lmao", "rofl",
+    "why", "why?", "why!", "why not", "why not?", "why me",
+    "who", "who?", "who!", "who are you", "who are you?", "who is this",
+    "who r u", "who is that", "lol", "lol?", "haha", "lmao", "rofl",
 )
 
-HARD_NEGATIVES = QUESTION_AND_REACTION_TRAPS + (
-    "how are you", "how are you?", "how are you!", "hru", "hru?", "hru!", "hyd", "hyd!",
+FALSE_SAVE_TRAPS = (
+    "a bf here", "a gf here", "a boyfriend here", "a girlfriend here",
+    "bf here", "gf here", "boyfriend here", "girlfriend here",
+)
+
+HARD_NEGATIVES = QUESTION_AND_REACTION_TRAPS + FALSE_SAVE_TRAPS + (
+    "how are you", "how are you?", "hru", "hru?", "hyd",
     "how r u", "how are u", "how u doing", "how's it going", "hows it going", "how was your day",
     "hor", "how ar you dopin", "how u doin", "hw r u", "how whas you da", "doing", "going", "wbu", "hbu",
     "wyd", "wyd?", "wud", "what are you doing", "what u doing", "what r u doing", "what u up to",
     "im good", "i'm good", "doing good", "im chat", "chatting", "chilling", "just chilling in bed",
     "bored", "borad", "lm borad", "im bored", "nothing much", "nothing much just bored", "nm", "nmu",
     "ur cute", "u seem nice", "i like u", "same", "sam", "same here", "sam here", "true", "cool", "nice",
+    "what r u looking for", "why r u on here", "m looking for girl , u", "lm finding gril", "looking for friends",
     "tunis", "tuinsi", "tunsia", "tounsi", "tounsia", "tun", "tn", "handi", "hindi", "ind", "inida",
     "hyw", "hyk", "hyb", "hypx", "hya", "ih", "ie", "iphey", "xhey", "hix", "hellod", "hellox",
     "f or m", "m or f", "m/f", "f/m", "f?", "m?", "girl?", "boy?", "male", "female", "famle",
@@ -161,6 +172,11 @@ GENDER_STATEMENT_FRAME_WORDS = (
     "hi", "hey", "helo", "hlo", "elo", "yo", "sup", "hiya", "heya", "howdy", "hy",
 )
 ALL_GENDER_ANCHOR_SET = frozenset(MALE_ANCHOR_WORDS + FEMALE_ANCHOR_WORDS + NEUTRAL_GENDER_WORDS)
+STRICT_S4_VOCAB = frozenset(
+    MALE_ANCHOR_WORDS + FEMALE_ANCHOR_WORDS + NEUTRAL_GENDER_WORDS
+    + GENDER_QUESTION_FRAME_WORDS + GENDER_STATEMENT_FRAME_WORDS
+)
+
 HRU_TOKEN_SET = frozenset(("hru", "hyd", "hor", "wbu", "hbu", "doing", "doin", "dopin", "diong", "going", "goin"))
 WYD_TOKEN_SET = frozenset(("wyd", "wud", "whatcha", "doing", "doin", "diong", "dopin"))
 
@@ -187,9 +203,11 @@ STATUS_FRAME_WORDS = (
     "ty", "lol", "haha", "and", "how", "what", "about", "hi", "hey", "hello", "yo",
 )
 ALL_STATUS_ANCHOR_SET = frozenset(STATUS_POS_ANCHOR_WORDS + STATUS_NEG_ANCHOR_WORDS + ("nmu",))
+STRICT_S6_VOCAB = frozenset(
+    STATUS_POS_ANCHOR_WORDS + STATUS_NEG_ANCHOR_WORDS + STATUS_ASK_BACK_WORDS + STATUS_FRAME_WORDS
+)
 
 # Step 7 O(1) Compliments/Flirt (Class 19) & Short Reactions/Ack (Class 20) Lookup Groups
-# Codes: 1=FlirtOnlyAnchor, 2=ReactOnlyAnchor(incl. same/sam), 3=DualFlirtReact, 4=FlirtSubject, 5=Framing
 S7_FLIRT_ANCHOR_WORDS = (
     "cute", "cuute", "cutie", "hot", "hott", "pretty", "prety", "gorgeous", "beautiful",
     "handsome", "sexy", "attractive", "adorable", "lovely", "charming", "funny", "smart",
@@ -217,6 +235,61 @@ S7_FRAME_WORDS = (
     "know", "of", "course", "then", "hi", "hey", "helo", "yo",
 )
 ALL_S7_ANCHOR_SET = frozenset(S7_FLIRT_ANCHOR_WORDS + S7_REACT_ANCHOR_WORDS + S7_DUAL_WORDS)
+STRICT_S7_VOCAB = frozenset(
+    S7_FLIRT_ANCHOR_WORDS + S7_REACT_ANCHOR_WORDS + S7_DUAL_WORDS + S7_SUBJECT_WORDS + S7_FRAME_WORDS
+)
+
+# Step 8 O(1) Looking For (Classes 21 & 22) 10-Code Lookup Groups
+S8_CORE_LOOK_VERBS = (
+    "looking", "lookin", "loking", "lokin", "finding", "findin", "find", "fnding",
+    "seeking", "seekin", "seek", "searching", "searchin", "search",
+    "brings", "bring", "goal", "purpose", "reason",
+)
+S8_DIRECT_FEMALE_TARGETS = (
+    "gf", "gfs", "girlfriend", "grilfriend", "girlfreind", "wifey", "wife",
+)
+S8_DIRECT_MALE_TARGETS = (
+    "bf", "bfs", "boyfriend", "boifriend", "boyfreind", "hubby", "husband",
+)
+S8_DIRECT_ROMANCE_TARGETS = (
+    "relationship", "relashionship", "relationships", "partner", "soulmate",
+    "dating", "date", "dates", "romance", "romantic", "flirting", "flirt", "hookup",
+)
+S8_DIRECT_FRIEND_TARGETS = (
+    "friends", "freind", "freinds", "frends", "frend", "friendship", "bestie", "company",
+)
+S8_FEMALE_NOUNS = (
+    "girl", "gril", "gurl", "girls", "grils", "gurls", "woman", "women",
+    "female", "famle", "famel", "females", "lady", "ladies", "f",
+)
+S8_MALE_NOUNS = (
+    "boy", "boi", "boys", "bois", "guy", "guys", "man", "men",
+    "male", "maale", "males", "dude", "dudes", "m",
+)
+S8_Q_CHOICE_WORDS = (
+    "what", "whats", "what's", "wat", "wht", "why", "who", "or",
+)
+S8_ACTION_VERBS = (
+    "making", "make", "trying", "tryna", "want", "wan", "wanna", "wanting",
+    "need", "needing", "hoping", "meet", "meeting",
+)
+S8_FRAME_WORDS = (
+    "im", "i'm", "l'm", "lm", "iam", "i'am", "i", "am", "just", "only", "mostly",
+    "are", "ar", "r", "do", "you", "u", "ya", "your", "ur", "for", "to", "here",
+    "on", "in", "a", "an", "new", "some", "good", "nice", "cute", "cool", "real",
+    "serious", "true", "friend", "love", "fun", "someone", "somebody", "people",
+    "ppl", "connection", "chat", "chatting", "chatin", "chating", "talk", "talking",
+    "wbu", "hbu", "so", "btw", "and", "about", "with", "hi", "hey",
+)
+ALL_S8_ANCHOR_SET = frozenset(
+    S8_CORE_LOOK_VERBS + S8_DIRECT_FEMALE_TARGETS + S8_DIRECT_MALE_TARGETS
+    + S8_DIRECT_ROMANCE_TARGETS + S8_DIRECT_FRIEND_TARGETS + ("making",)
+)
+STRICT_S8_VOCAB = frozenset(
+    S8_CORE_LOOK_VERBS + S8_DIRECT_FEMALE_TARGETS + S8_DIRECT_MALE_TARGETS
+    + S8_DIRECT_ROMANCE_TARGETS + S8_DIRECT_FRIEND_TARGETS + S8_FEMALE_NOUNS
+    + S8_MALE_NOUNS + S8_Q_CHOICE_WORDS + S8_ACTION_VERBS + S8_FRAME_WORDS
+)
 
 BUILTIN_GENDER_CHOICE = (
     "m or f", "m or f?", "f or m", "f or m?", "m/f", "f/m", "m f", "f m", "m f?", "f m?",
@@ -333,6 +406,57 @@ BUILTIN_REACT = (
     "oh ok", "oh okay", "yeah", "yea", "yep", "yup", "sure", "ofc", "wow", "omg",
 )
 
+BUILTIN_ASK_LOOKING = (
+    "what are you looking for", "what are you looking for?", "what r u looking for",
+    "what r u looking for?", "what u looking for", "what u looking for?",
+    "what are u looking for", "wat u looking for", "what r u lookin for",
+    "what are you finding", "what r u finding", "what u finding",
+    "what r u looking for here", "what are you here for", "what r u here for",
+    "what do u want here", "what u want here", "who r u looking for", "who u looking for",
+    "why are you here", "why r u here", "why r u on here", "why r u on here?",
+    "why are you on here", "what brings u here", "what brings you here",
+    "looking for?", "looking for what?", "finding what?", "wbu what r u looking for",
+    "looking for friends or dating", "looking for friends or dating?",
+    "looking for dating or friends", "looking for boy or girl", "looking for girl or boy",
+    "are you looking for friends or dating", "are u looking for a bf", "r u looking for a bf",
+    "are u looking for a gf", "r u looking for a gf", "u looking for a girl",
+    "u looking for a girl?", "u looking for a boy", "u looking for a boy?",
+    "u looking for a gf", "u looking for a bf", "u looking for friends",
+    "are u looking for friends", "are u looking for a relationship",
+    "friends?", "dating?", "relationship?", "gf?", "bf?",
+)
+
+BUILTIN_STATE_LOOKING = (
+    "m looking for girl , u", "m looking for girl u", "m looking for girl u?",
+    "m looking for a girl", "m looking for a girl u?", "m looking for gril",
+    "m looking for gf", "m looking for a gf", "m looking for f", "m looking for female",
+    "lm finding gril", "im finding gril", "lm finding girl", "im finding a girl",
+    "lm looking for gril", "im looking for girl", "im looking for a girl",
+    "f looking for boy", "f looking for boy u?", "f looking for a boy",
+    "f looking for guy", "f looking for bf", "f looking for m", "girl looking for boy",
+    "boy looking for girl", "guy looking for girl", "guy looking for a girl",
+    "looking for friends", "im looking for friends", "just looking for friends",
+    "looking for new friends", "looking for some friends", "making friends",
+    "making new friends", "just making friends", "im making friends",
+    "here to make friends", "looking to make friends", "here to chat",
+    "just here to chat", "looking to chat", "just looking to chat",
+    "looking for friends u?", "im looking for friends u?", "making friends wbu?",
+    "looking for a gf", "im looking for a gf", "looking for gf", "looking for a girlfriend",
+    "im looking for a girlfriend", "looking for a bf", "im looking for a bf",
+    "looking for bf", "looking for a boyfriend", "im looking for a boyfriend",
+    "looking for a relationship", "im looking for a relationship", "looking for dating",
+    "im looking for dating", "looking for love", "im looking for love",
+    "looking for fun", "just looking for fun", "here for dating", "here for friends",
+    "i want a gf", "i want a girl", "want a gf", "need a gf", "tryna find a gf",
+    "tryna find a girl", "trying to find a girl",
+    "gf", "a gf", "girlfriend", "a girlfriend", "gf u?", "a gf u?", "a gf wbu?",
+    "bf", "a bf", "boyfriend", "a boyfriend", "bf u?", "a bf u?", "a bf wbu?",
+    "friends", "new friends", "some friends", "good friends", "just friends",
+    "only friends", "friendship", "friends u?", "friends wbu?",
+    "dating", "just dating", "relationship", "a relationship", "serious relationship",
+    "romance", "soulmate", "a soulmate", "dating u?", "relationship wbu?",
+)
+
 
 def get_system_ram_gb():
     if os.path.exists("/proc/meminfo"):
@@ -376,6 +500,14 @@ def quantize_to_int8(w_fp32):
     rounded = np.rint(scaled, dtype=np.float32)
     clipped = np.clip(rounded, np.float32(-127.0), np.float32(127.0), dtype=np.float32)
     return clipped.astype(np.int8), np.array([scale], dtype=np.float32)
+
+
+def _is_whitelist_clean(s, allowed_vocab):
+    # Rule 12 Gate 2: Verifies every token exists in the step's closed whitelist before training or Bloom hashing
+    words = [w.strip("'!?.,/") for w in s.replace("/", " ").split() if w.strip("'!?.,/")]
+    if not words or len(words) > 6:
+        return False
+    return all(w in allowed_vocab for w in words)
 
 
 def ensure_dataset_files():
@@ -435,6 +567,13 @@ def ensure_dataset_files():
                 build_flirt_react_txt.build_flirt_and_react_files()
         except Exception:
             pass
+    if not os.path.exists("looking_for_ask.txt") or not os.path.exists("looking_for_state.txt"):
+        try:
+            import build_looking_for_txt
+            if hasattr(build_looking_for_txt, "build_looking_for_files"):
+                build_looking_for_txt.build_looking_for_files()
+        except Exception:
+            pass
 
     fallback_files = (
         ("gender_ask_choice.txt", BUILTIN_GENDER_CHOICE),
@@ -448,6 +587,8 @@ def ensure_dataset_files():
         ("status_ask_back.txt", BUILTIN_STATUS_ASK_BACK),
         ("compliments_flirt.txt", BUILTIN_FLIRT),
         ("reactions_ack.txt", BUILTIN_REACT),
+        ("looking_for_ask.txt", BUILTIN_ASK_LOOKING),
+        ("looking_for_state.txt", BUILTIN_STATE_LOOKING),
     )
     for fn, items in fallback_files:
         if not os.path.exists(fn):
@@ -643,6 +784,7 @@ def train_step1_into_vault(vault, device):
         "gender_state_female.txt", "gender_state_male.txt",
         "status_positive.txt", "status_negative.txt", "status_ask_back.txt",
         "compliments_flirt.txt", "reactions_ack.txt",
+        "looking_for_ask.txt", "looking_for_state.txt",
     )
     for nf in neg_files:
         if os.path.exists(nf):
@@ -769,13 +911,14 @@ def train_step2_into_vault(vault, device):
                         country_lut_a[h4[0]], country_lut_b[h4[1]] = np.uint8(20), np.uint8(20)
                     s2_frame_bloom[h4[:3]] = np.int8(1)
 
-    sample_map = {t: (0, np.float32(35.0)) for t in QUESTION_AND_REACTION_TRAPS}
+    sample_map = {t: (0, np.float32(35.0)) for t in QUESTION_AND_REACTION_TRAPS + FALSE_SAVE_TRAPS}
     for gf in (
         "greetings.txt", "negatives.txt", "hru.txt", "wyd.txt",
         "gender_ask_choice.txt", "gender_ask_is_female.txt", "gender_ask_is_male.txt",
         "gender_state_female.txt", "gender_state_male.txt",
         "status_positive.txt", "status_negative.txt", "status_ask_back.txt",
         "compliments_flirt.txt", "reactions_ack.txt",
+        "looking_for_ask.txt", "looking_for_state.txt",
     ):
         if os.path.exists(gf):
             with open(gf, "r", encoding="ascii", errors="ignore") as f:
@@ -823,6 +966,7 @@ def train_step3_into_vault(vault, device):
         "greetings.txt", "ages.txt", "countries.txt", "negatives.txt", "underage_traps.txt",
         "wyd.txt", "gender_ask_choice.txt", "gender_ask_is_female.txt", "gender_ask_is_male.txt",
         "status_positive.txt", "status_negative.txt", "compliments_flirt.txt", "reactions_ack.txt",
+        "looking_for_ask.txt", "looking_for_state.txt",
     ):
         if os.path.exists(gf):
             with open(gf, "r", encoding="ascii", errors="ignore") as f:
@@ -845,12 +989,12 @@ def train_step3_into_vault(vault, device):
                     for w in _collapse_word(clean_s).split():
                         s3_hru_bloom[hash_word(w)[:3]] = np.int8(1)
 
-    for trap in QUESTION_AND_REACTION_TRAPS + (
+    for trap in QUESTION_AND_REACTION_TRAPS + FALSE_SAVE_TRAPS + (
         "how old are you", "how old r u", "where are you from", "where r u from",
         "what are you doing", "what u doing", "wyd", "doing good", "im doing good",
         "hi", "hi hi", "hy", "hyy", "hey", "hello", "yo", "sup",
         "m?", "f?", "m or f?", "are you a girl?", "are you a boy?",
-        "ur cute", "u seem nice", "same", "sam", "same here",
+        "ur cute", "u seem nice", "same", "sam", "same here", "what r u looking for",
     ):
         sample_map[trap] = (0, np.float32(55.0))
 
@@ -895,7 +1039,7 @@ def train_step4_into_vault(vault, device):
     for gf in (
         "greetings.txt", "ages.txt", "countries.txt", "hru.txt", "wyd.txt",
         "negatives.txt", "underage_traps.txt", "status_positive.txt", "status_negative.txt",
-        "compliments_flirt.txt", "reactions_ack.txt",
+        "compliments_flirt.txt", "reactions_ack.txt", "looking_for_ask.txt", "looking_for_state.txt",
     ):
         if os.path.exists(gf):
             with open(gf, "r", encoding="ascii", errors="ignore") as f:
@@ -922,23 +1066,18 @@ def train_step4_into_vault(vault, device):
             if s:
                 sample_map[s] = (cls_id, np.float32(30.0))
                 gender_cnt += 1
-                clean_s = "".join(ch if ("a" <= ch <= "z" or ch == " " or ch == "'") else " " for ch in s)
-                for w in _collapse_word(clean_s).split():
-                    s4_gender_bloom[hash_word(w)[:3]] = np.int8(1)
         if os.path.exists(file_name):
             with open(file_name, "r", encoding="ascii", errors="ignore") as f:
                 for line in f:
                     s = " ".join(line.strip().lower().split())
-                    if s:
+                    if s and (cls_id == 6 or _is_whitelist_clean(s, STRICT_S4_VOCAB)):
                         sample_map[s] = (cls_id, np.float32(24.0))
                         gender_cnt += 1
-                        clean_s = "".join(ch if ("a" <= ch <= "z" or ch == " " or ch == "'") else " " for ch in s)
-                        for w in _collapse_word(clean_s).split():
-                            s4_gender_bloom[hash_word(w)[:3]] = np.int8(1)
 
-    for trap in QUESTION_AND_REACTION_TRAPS + (
+    for trap in QUESTION_AND_REACTION_TRAPS + FALSE_SAVE_TRAPS + (
         "how old are you?", "where are you from?", "how are you?", "hru?", "wyd?", "age?", "from?", "country?",
         "hey man", "hi man", "yo man", "m bi", "u d?", "im good", "lm borad", "ur cute", "same", "sam",
+        "m looking for girl , u", "lm finding gril", "f looking for boy",
     ):
         sample_map[trap] = (0, np.float32(60.0))
 
@@ -969,7 +1108,7 @@ def train_step5_into_vault(vault, device):
     for gf in (
         "greetings.txt", "ages.txt", "countries.txt", "hru.txt", "negatives.txt",
         "gender_ask_choice.txt", "status_positive.txt", "status_negative.txt", "status_ask_back.txt",
-        "compliments_flirt.txt", "reactions_ack.txt",
+        "compliments_flirt.txt", "reactions_ack.txt", "looking_for_ask.txt", "looking_for_state.txt",
     ):
         if os.path.exists(gf):
             with open(gf, "r", encoding="ascii", errors="ignore") as f:
@@ -1001,9 +1140,10 @@ def train_step5_into_vault(vault, device):
                     for w in _collapse_word(clean_s).split():
                         s5_wyd_bloom[hash_word(w)[:3]] = np.int8(1)
 
-    for trap in QUESTION_AND_REACTION_TRAPS + (
+    for trap in QUESTION_AND_REACTION_TRAPS + FALSE_SAVE_TRAPS + (
         "how are you", "how are you doing", "how r u doing", "how u doing", "how u doin",
         "whats up", "what's up", "what is up", "what are you", "what r u", "are you",
+        "what r u looking for", "what are you looking for", "what u looking for",
         "doing good", "doing great", "doing fine", "doing nothing", "not doing much",
         "hi", "hey", "hello", "yo", "sup", "ur cute", "u seem nice", "same", "sam",
     ):
@@ -1050,7 +1190,7 @@ def train_step6_into_vault(vault, device):
         "greetings.txt", "ages.txt", "countries.txt", "hru.txt", "wyd.txt",
         "negatives.txt", "gender_ask_choice.txt", "gender_ask_is_female.txt",
         "gender_ask_is_male.txt", "gender_state_female.txt", "gender_state_male.txt",
-        "compliments_flirt.txt", "reactions_ack.txt",
+        "compliments_flirt.txt", "reactions_ack.txt", "looking_for_ask.txt", "looking_for_state.txt",
     ):
         if os.path.exists(gf):
             with open(gf, "r", encoding="ascii", errors="ignore") as f:
@@ -1074,25 +1214,20 @@ def train_step6_into_vault(vault, device):
             if s:
                 sample_map[s] = (cls_id, np.float32(32.0))
                 status_cnt += 1
-                clean_s = "".join(ch if ("a" <= ch <= "z" or ch == " " or ch == "'") else " " for ch in s)
-                for w in _collapse_word(clean_s).split():
-                    s6_status_bloom[hash_word(w)[:3]] = np.int8(1)
         if os.path.exists(file_name):
             with open(file_name, "r", encoding="ascii", errors="ignore") as f:
                 for line in f:
                     s = " ".join(line.strip().lower().split())
-                    if s:
+                    if s and _is_whitelist_clean(s, STRICT_S6_VOCAB):
                         sample_map[s] = (cls_id, np.float32(24.0))
                         status_cnt += 1
-                        clean_s = "".join(ch if ("a" <= ch <= "z" or ch == " " or ch == "'") else " " for ch in s)
-                        for w in _collapse_word(clean_s).split():
-                            s6_status_bloom[hash_word(w)[:3]] = np.int8(1)
 
-    for trap in QUESTION_AND_REACTION_TRAPS + (
+    for trap in QUESTION_AND_REACTION_TRAPS + FALSE_SAVE_TRAPS + (
         "how are you", "how r u", "hru", "hyd", "wyd", "what are you doing", "what u doing",
         "good morning", "good afternoon", "good evening", "good day", "good night", "good luck", "good job",
         "hi", "hey", "hello", "yo", "sup", "whats up", "what's up", "age?", "from?", "m or f?",
         "ur cute", "u seem nice", "i like u", "same", "sam", "same here", "sam here", "true", "nice", "cool",
+        "here to chat", "looking to chat", "looking for friends", "m looking for girl , u",
     ):
         sample_map[trap] = (0, np.float32(60.0))
 
@@ -1121,7 +1256,6 @@ def train_step7_into_vault(vault, device):
         w_vec[15] = np.int32(L)
         return (w_vec @ wp_mat) & b_mask
 
-    # Populate O(1) Step 7 LUTs: 5=Frame, 4=FlirtSubject, 3=DualFlirtReact, 2=ReactOnly(same/sam), 1=FlirtOnly
     for code_val, word_group in (
         (5, S7_FRAME_WORDS),
         (4, S7_SUBJECT_WORDS),
@@ -1141,6 +1275,7 @@ def train_step7_into_vault(vault, device):
         "gender_ask_choice.txt", "gender_ask_is_female.txt", "gender_ask_is_male.txt",
         "gender_state_female.txt", "gender_state_male.txt",
         "status_positive.txt", "status_negative.txt", "status_ask_back.txt",
+        "looking_for_ask.txt", "looking_for_state.txt",
     ):
         if os.path.exists(gf):
             with open(gf, "r", encoding="ascii", errors="ignore") as f:
@@ -1163,22 +1298,15 @@ def train_step7_into_vault(vault, device):
             if s:
                 sample_map[s] = (cls_id, np.float32(34.0))
                 s7_cnt += 1
-                clean_s = "".join(ch if ("a" <= ch <= "z" or ch == " " or ch == "'") else " " for ch in s)
-                for w in _collapse_word(clean_s).split():
-                    s7_bloom[hash_word(w)[:3]] = np.int8(1)
         if os.path.exists(file_name):
             with open(file_name, "r", encoding="ascii", errors="ignore") as f:
                 for line in f:
                     s = " ".join(line.strip().lower().split())
-                    if s:
+                    if s and _is_whitelist_clean(s, STRICT_S7_VOCAB):
                         sample_map[s] = (cls_id, np.float32(24.0))
                         s7_cnt += 1
-                        clean_s = "".join(ch if ("a" <= ch <= "z" or ch == " " or ch == "'") else " " for ch in s)
-                        for w in _collapse_word(clean_s).split():
-                            s7_bloom[hash_word(w)[:3]] = np.int8(1)
 
-    # Strict Anti-Collision Negative Traps for Step 7
-    for trap in (
+    for trap in FALSE_SAVE_TRAPS + (
         "what", "what?", "what!", "what is this", "what do you want", "what do you do",
         "why", "why?", "why not", "who", "who?", "who are you", "who r u",
         "nice to meet you", "nice to meet u", "good to see you", "good morning", "good afternoon",
@@ -1190,6 +1318,7 @@ def train_step7_into_vault(vault, device):
         "im bored", "bored", "lm borad", "nothing much", "nmu", "im good u?", "good u?",
         "same age", "same country", "are we the same age", "what is the same", "salam",
         "age?", "from?", "m or f?", "f?", "m?", "im a girl", "im a boy",
+        "m looking for girl , u", "lm finding gril", "looking for friends",
     ):
         sample_map[trap] = (0, np.float32(65.0))
 
@@ -1202,6 +1331,113 @@ def train_step7_into_vault(vault, device):
     print(f"[STEP 7 DONE] Locked Step 7 Flirt & Reaction head & LUTs ({s7_cnt} lines, {n} total) into vault.", flush=True)
 
 
+def train_step8_into_vault(vault, device):
+    wp_mat = _get_wp_mat()
+    s8_bloom = np.zeros((BLOOM_SIZE,), dtype=np.int8)
+    s8_lut_a = np.zeros((BLOOM_SIZE,), dtype=np.uint8)
+    s8_lut_b = np.zeros((BLOOM_SIZE,), dtype=np.uint8)
+    b_mask = np.int32(BLOOM_SIZE - 1)
+    w_vec = np.zeros((16,), dtype=np.int32)
+
+    def hash_word(w_str):
+        b = np.frombuffer(w_str.encode("ascii", errors="ignore"), dtype=np.uint8)
+        L = min(int(b.shape[0]), 15)
+        w_vec.fill(0)
+        w_vec[:L] = b[:L]
+        w_vec[15] = np.int32(L)
+        return (w_vec @ wp_mat) & b_mask
+
+    for code_val, word_group in (
+        (10, S8_FRAME_WORDS),
+        (9, S8_ACTION_VERBS),
+        (8, S8_Q_CHOICE_WORDS),
+        (7, S8_MALE_NOUNS),
+        (6, S8_FEMALE_NOUNS),
+        (5, S8_DIRECT_FRIEND_TARGETS),
+        (4, S8_DIRECT_ROMANCE_TARGETS),
+        (3, S8_DIRECT_MALE_TARGETS),
+        (2, S8_DIRECT_FEMALE_TARGETS),
+        (1, S8_CORE_LOOK_VERBS),
+    ):
+        for w in word_group:
+            h4 = hash_word(_collapse_word(w))
+            s8_lut_a[h4[0]] = np.uint8(code_val)
+            s8_lut_b[h4[1]] = np.uint8(code_val)
+            s8_bloom[h4[:3]] = np.int8(1)
+
+    sample_map = {}
+    for gf in (
+        "greetings.txt", "ages.txt", "countries.txt", "hru.txt", "wyd.txt",
+        "gender_ask_choice.txt", "status_positive.txt", "status_negative.txt",
+        "compliments_flirt.txt", "reactions_ack.txt",
+    ):
+        if os.path.exists(gf):
+            with open(gf, "r", encoding="ascii", errors="ignore") as f:
+                for line in f:
+                    s = " ".join(line.strip().lower().split())
+                    if s and len(sample_map) < 14000:
+                        toks = [w.strip("'!?.,/") for w in s.split()]
+                        if not any(w in ALL_S8_ANCHOR_SET for w in toks):
+                            sample_map[s] = (0, np.float32(2.0))
+
+    s8_cnt = 0
+    for fn, cls_id, builtins in (
+        ("looking_for_ask.txt", 1, BUILTIN_ASK_LOOKING),
+        ("looking_for_state.txt", 2, BUILTIN_STATE_LOOKING),
+    ):
+        for b_line in builtins:
+            s = " ".join(b_line.strip().lower().split())
+            if s:
+                sample_map[s] = (cls_id, np.float32(36.0))
+                s8_cnt += 1
+        if os.path.exists(fn):
+            with open(fn, "r", encoding="ascii", errors="ignore") as f:
+                for line in f:
+                    s = " ".join(line.strip().lower().split())
+                    if s and _is_whitelist_clean(s, STRICT_S8_VOCAB):
+                        sample_map[s] = (cls_id, np.float32(24.0))
+                        s8_cnt += 1
+
+    for trap in QUESTION_AND_REACTION_TRAPS + FALSE_SAVE_TRAPS + (
+        "what are you doing", "what r u doing", "what u up to", "wyd",
+        "just chatting", "chatting", "im chatting", "im chat", "chilling",
+        "u look good", "you look good", "u look cute", "ur cute", "u seem nice",
+        "same", "sam", "same here", "sam here", "m here", "f here", "im here",
+        "im a girl", "im a boy", "are u a girl", "are u a boy", "f", "m",
+        "where are you from", "how old are you", "how are you", "m or f?",
+    ):
+        sample_map[trap] = (0, np.float32(65.0))
+
+    q_emb, q_w1, q_w2, n = _train_word_mlp_head(sample_map, S8_CLASSES, 28, "STEP 8", device, wp_mat, use_qmark=True)
+    vault.update(
+        s8_emb_q=q_emb[0], s8_emb_s=q_emb[1], s8_w1_q=q_w1[0], s8_w1_s=q_w1[1],
+        s8_w2_q=q_w2[0], s8_w2_s=q_w2[1], s8_bloom_q=s8_bloom,
+        s8_lut_a=s8_lut_a, s8_lut_b=s8_lut_b,
+    )
+    print(f"[STEP 8 DONE] Locked Step 8 Looking-For head & LUTs ({s8_cnt} lines, {n} total) into vault.", flush=True)
+
+
+STEP_KEY_MAP = (
+    (1, ("emb_q", "emb_s", "wqkv1_q", "wqkv1_s", "wo1_q", "wo1_s", "w1_q", "w1_s", "w2_q", "w2_s", "wqkv2_q", "wqkv2_s", "wo2_q", "wo2_s", "w3_q", "w3_s", "w4_q", "w4_s", "w_intent_q", "w_intent_s")),
+    (2, ("s2_emb_q", "s2_emb_s", "s2_w1_q", "s2_w1_s", "s2_w2_q", "s2_w2_s", "s2_frame_bloom_q", "s2_country_lut_a", "s2_country_lut_b")),
+    (3, ("s3_emb_q", "s3_emb_s", "s3_w1_q", "s3_w1_s", "s3_w2_q", "s3_w2_s", "s3_hru_bloom_q")),
+    (4, ("s4_emb_q", "s4_emb_s", "s4_w1_q", "s4_w1_s", "s4_w2_q", "s4_w2_s", "s4_gender_bloom_q", "s4_gender_lut_a", "s4_gender_lut_b")),
+    (5, ("s5_emb_q", "s5_emb_s", "s5_w1_q", "s5_w1_s", "s5_w2_q", "s5_w2_s", "s5_wyd_bloom_q")),
+    (6, ("s6_emb_q", "s6_emb_s", "s6_w1_q", "s6_w1_s", "s6_w2_q", "s6_w2_s", "s6_status_bloom_q", "s6_status_lut_a", "s6_status_lut_b")),
+    (7, ("s7_emb_q", "s7_emb_s", "s7_w1_q", "s7_w1_s", "s7_w2_q", "s7_w2_s", "s7_flirt_react_bloom_q", "s7_lut_a", "s7_lut_b")),
+    (8, ("s8_emb_q", "s8_emb_s", "s8_w1_q", "s8_w1_s", "s8_w2_q", "s8_w2_s", "s8_bloom_q", "s8_lut_a", "s8_lut_b")),
+)
+
+
+def _hash_protected_keys(vault_dict, protected_key_set):
+    snap = {}
+    for k in protected_key_set:
+        if k in vault_dict:
+            arr = vault_dict[k]
+            snap[k] = (hashlib.sha256(arr.tobytes()).hexdigest(), arr.shape, arr.dtype.str)
+    return snap
+
+
 def run_vault_trainer(
     output_path="model_weights.npz",
     force_s1=False,
@@ -1211,62 +1447,70 @@ def run_vault_trainer(
     force_s5=False,
     force_s6=False,
     force_s7=False,
+    force_s8=False,
 ):
     ensure_dataset_files()
     vault = {}
     if os.path.exists(output_path):
         with np.load(output_path, allow_pickle=False) as data:
             for k in data.files:
-                vault[k] = data[k]
+                vault[k] = data[k].copy()
 
-    need_s1 = force_s1 or ("w_intent_q" not in vault)
-    need_s2 = force_s2 or ("s2_country_lut_a" not in vault)
-    need_s3 = force_s3 or ("s3_w2_q" not in vault)
-    need_s4 = force_s4 or ("s4_w2_q" not in vault) or ("s4_gender_lut_a" not in vault)
-    need_s5 = force_s5 or ("s5_w2_q" not in vault) or ("s5_wyd_bloom_q" not in vault)
-    need_s6 = force_s6 or ("s6_w2_q" not in vault) or ("s6_status_lut_a" not in vault)
-    need_s7 = force_s7 or ("s7_w2_q" not in vault) or ("s7_lut_a" not in vault)
+    need_flags = {
+        1: force_s1 or ("w_intent_q" not in vault),
+        2: force_s2 or ("s2_country_lut_a" not in vault),
+        3: force_s3 or ("s3_w2_q" not in vault),
+        4: force_s4 or ("s4_w2_q" not in vault) or ("s4_gender_lut_a" not in vault),
+        5: force_s5 or ("s5_w2_q" not in vault) or ("s5_wyd_bloom_q" not in vault),
+        6: force_s6 or ("s6_w2_q" not in vault) or ("s6_status_lut_a" not in vault),
+        7: force_s7 or ("s7_w2_q" not in vault) or ("s7_lut_a" not in vault),
+        8: force_s8 or ("s8_w2_q" not in vault) or ("s8_lut_a" not in vault),
+    }
 
-    if not (need_s1 or need_s2 or need_s3 or need_s4 or need_s5 or need_s6 or need_s7):
-        print(f"[VAULT OK] Steps 1, 2, 3, 4, 5, 6 & 7 are all locked in '{output_path}'!", flush=True)
+    if not any(need_flags.values()):
+        print(f"[VAULT OK] Steps 1, 2, 3, 4, 5, 6, 7 & 8 are all locked in '{output_path}'!", flush=True)
         return
+
+    # Rule 12 Cryptographic .NPZ Vault Lock: Snapshot SHA-256 of all protected (untouched) step keys
+    protected_keys = set()
+    for step_idx, k_tuple in STEP_KEY_MAP:
+        if not need_flags[step_idx]:
+            protected_keys.update(k_tuple)
+    pre_hashes = _hash_protected_keys(vault, protected_keys)
 
     ram_arena = verify_hardware_and_lock_ram()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    if need_s1:
-        train_step1_into_vault(vault, device)
-    else:
-        print("[VAULT PROTECTED] Step 1 weights untouched!", flush=True)
-    if need_s2:
-        train_step2_into_vault(vault, device)
-    else:
-        print("[VAULT PROTECTED] Step 2 weights untouched!", flush=True)
-    if need_s3:
-        train_step3_into_vault(vault, device)
-    else:
-        print("[VAULT PROTECTED] Step 3 weights untouched!", flush=True)
-    if need_s4:
-        train_step4_into_vault(vault, device)
-    else:
-        print("[VAULT PROTECTED] Step 4 weights untouched!", flush=True)
-    if need_s5:
-        train_step5_into_vault(vault, device)
-    else:
-        print("[VAULT PROTECTED] Step 5 weights untouched!", flush=True)
-    if need_s6:
-        train_step6_into_vault(vault, device)
-    else:
-        print("[VAULT PROTECTED] Step 6 weights untouched!", flush=True)
-    if need_s7:
-        train_step7_into_vault(vault, device)
-    else:
-        print("[VAULT PROTECTED] Step 7 weights untouched!", flush=True)
+    train_fns = (
+        (1, train_step1_into_vault),
+        (2, train_step2_into_vault),
+        (3, train_step3_into_vault),
+        (4, train_step4_into_vault),
+        (5, train_step5_into_vault),
+        (6, train_step6_into_vault),
+        (7, train_step7_into_vault),
+        (8, train_step8_into_vault),
+    )
+    for step_idx, fn in train_fns:
+        if need_flags[step_idx]:
+            fn(vault, device)
+        else:
+            print(f"[VAULT PROTECTED] Step {step_idx} weights untouched!", flush=True)
 
     np.savez(output_path, **vault)
     del ram_arena
+
+    # Rule 12 Post-Save Cryptographic SHA-256 Verification
+    if pre_hashes:
+        with np.load(output_path, allow_pickle=False) as saved_arc:
+            post_vault = {k: saved_arc[k] for k in saved_arc.files}
+        post_hashes = _hash_protected_keys(post_vault, protected_keys)
+        if pre_hashes != post_hashes:
+            raise RuntimeError("[RULE 12 VAULT BREACH] Protected Step weights were altered during save!")
+        print(f"[RULE 12 VAULT SHIELD] Verified SHA-256 integrity of all {len(pre_hashes)} protected arrays in '{output_path}'!", flush=True)
+
     size_kb = os.path.getsize(output_path) / 1024.0 if os.path.exists(output_path) else 0.0
-    print(f"[EXPORT COMPLETE] Saved Step 1+2+3+4+5+6+7 vault to '{output_path}' ({size_kb:.2f} KB)", flush=True)
+    print(f"[EXPORT COMPLETE] Saved Step 1-8 vault to '{output_path}' ({size_kb:.2f} KB)", flush=True)
 
 
 if __name__ == "__main__":
@@ -1281,4 +1525,5 @@ if __name__ == "__main__":
         force_s5=("--step5" in args) or ("--force-step5" in args) or do_all,
         force_s6=("--step6" in args) or ("--force-step6" in args) or do_all,
         force_s7=("--step7" in args) or ("--force-step7" in args) or do_all,
+        force_s8=("--step8" in args) or ("--force-step8" in args) or do_all,
     )

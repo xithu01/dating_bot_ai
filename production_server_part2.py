@@ -607,6 +607,9 @@ def handle_user_query(model, slot, users, uid, mv_payload, forward_pass_fn):
     if class_id in (21, 22):
         from step8_looking_for import route_step8
         return route_step8(class_id, aux_id, users, uid, flags, prev_age, prev_country, bot_g, rot8)
+    if class_id in (23, 24):
+        from step9_name import route_step9
+        return route_step9(class_id, aux_id, users, uid, flags, prev_age, prev_country, bot_g, rot8)
     return CACHED_REJECT_RESPONSE
 
 

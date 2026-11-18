@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # FILE: step8_looking_for.py
 # PURPOSE: Standalone Step 8 Plugin (Classes 21-22: Ask / State "What Are You Looking For?")
-#          Handles:
-#          - "m looking for girl , u", "lm finding gril", "f looking for boy wbu?"
-#          - Questions ("what r u looking for?", "u looking for a girl?", "looking for friends or dating?")
-#          - Direct responses ("gf", "a gf", "bf", "a bf", "friends", "new friends", "dating", "relationship")
-#          - Persona-aware replies (Bot F vs Bot M) + automatic user gender extraction from "m looking..." / "f looking..."
+# RULES: Enforces Rules 1-13:
+#        - Cryptographic SHA-256 Vault Integrity Lock on model_weights.npz (Steps 1-7 verified unchanged)
+#        - Blocks false saves ("a bf here", "a gf here") at both training and O(1) inference time
+#        - Handles questions, "m looking for girl , u", "lm finding gril", and direct answers ("a gf", "friends")
 
+import hashlib
 import os
 import sys
 import numpy as np
@@ -76,8 +76,7 @@ S8_FRAME_WORDS = (
     "on", "in", "a", "an", "new", "some", "good", "nice", "cute", "cool", "real",
     "serious", "true", "friend", "love", "fun", "someone", "somebody", "people",
     "ppl", "connection", "chat", "chatting", "chatin", "chating", "talk", "talking",
-    "tbh", "ngl", "lol", "haha", "wbu", "hbu", "so", "btw", "and", "about", "with",
-    "hi", "hey", "hello", "yo",
+    "wbu", "hbu", "so", "btw", "and", "about", "with", "hi", "hey",
 )
 
 ALL_S8_ANCHOR_SET = frozenset(
@@ -105,24 +104,22 @@ BUILTIN_ASK_LOOKING = (
     "friends?", "dating?", "relationship?", "gf?", "bf?",
 )
 
+# Rule 13: Clean Built-ins (Zero "a bf here", zero "tbh!", zero "lol!" clone bloat)
 BUILTIN_STATE_LOOKING = (
-    # User exact test cases & variants
     "m looking for girl , u", "m looking for girl u", "m looking for girl u?",
     "m looking for a girl", "m looking for a girl u?", "m looking for gril",
     "m looking for gf", "m looking for a gf", "m looking for f", "m looking for female",
     "lm finding gril", "im finding gril", "lm finding girl", "im finding a girl",
     "lm looking for gril", "im looking for girl", "im looking for a girl",
-    "f looking for boy", "f looking for boy u", "f looking for a boy",
+    "f looking for boy", "f looking for boy u?", "f looking for a boy",
     "f looking for guy", "f looking for bf", "f looking for m", "girl looking for boy",
-    "boy looking for girl", "guy looking for girl",
-    # Friends / Chat
+    "boy looking for girl", "guy looking for girl", "guy looking for a girl",
     "looking for friends", "im looking for friends", "just looking for friends",
     "looking for new friends", "looking for some friends", "making friends",
     "making new friends", "just making friends", "im making friends",
     "here to make friends", "looking to make friends", "here to chat",
     "just here to chat", "looking to chat", "just looking to chat",
     "looking for friends u?", "im looking for friends u?", "making friends wbu?",
-    # GF / BF / Dating / Relationship
     "looking for a gf", "im looking for a gf", "looking for gf", "looking for a girlfriend",
     "im looking for a girlfriend", "looking for a bf", "im looking for a bf",
     "looking for bf", "looking for a boyfriend", "im looking for a boyfriend",
@@ -131,11 +128,10 @@ BUILTIN_STATE_LOOKING = (
     "looking for fun", "just looking for fun", "here for dating", "here for friends",
     "i want a gf", "i want a girl", "want a gf", "need a gf", "tryna find a gf",
     "tryna find a girl", "trying to find a girl",
-    # Direct Short Responses
-    "gf", "a gf", "girlfriend", "a girlfriend", "grilfriend", "gf u?", "a gf wbu?",
-    "bf", "a bf", "boyfriend", "a boyfriend", "bf u?", "a bf wbu?",
+    "gf", "a gf", "girlfriend", "a girlfriend", "gf u?", "a gf u?", "a gf wbu?",
+    "bf", "a bf", "boyfriend", "a boyfriend", "bf u?", "a bf u?", "a bf wbu?",
     "friends", "new friends", "some friends", "good friends", "just friends",
-    "only friends", "freinds", "frends", "friendship", "friends u?", "friends wbu?",
+    "only friends", "friendship", "friends u?", "friends wbu?",
     "dating", "just dating", "relationship", "a relationship", "serious relationship",
     "romance", "soulmate", "a soulmate", "dating u?", "relationship wbu?",
 )
@@ -186,7 +182,6 @@ CACHED_REPEAT_ASK_LOOKING_POOL = _make_pool(
     '["looking for friends","looking for dating"]',
 )
 
-# User is looking for a Girl / GF (aux_id == 2) -> Bot is Female (bot_g == 2)
 CACHED_STATE_GIRL_BOT_F_POOL = _make_pool(
     22, "false", "state_looking_for_girl",
     (
@@ -217,7 +212,6 @@ CACHED_STATE_GIRL_BOT_F_COMPLETE_POOL = _make_pool(
     '["ur cute","just chilling","wyd?"]',
 )
 
-# User is looking for a Girl / GF (aux_id == 2) -> Bot is Male (bot_g == 1)
 CACHED_STATE_GIRL_BOT_M_POOL = _make_pool(
     22, "false", "state_looking_for_girl",
     (
@@ -233,7 +227,6 @@ CACHED_STATE_GIRL_BOT_M_POOL = _make_pool(
     '["im 22","from usa","ok cool"]',
 )
 
-# User is looking for a Boy / BF (aux_id == 3) -> Bot is Female (bot_g == 2)
 CACHED_STATE_BOY_BOT_F_POOL = _make_pool(
     22, "false", "state_looking_for_boy",
     (
@@ -249,7 +242,6 @@ CACHED_STATE_BOY_BOT_F_POOL = _make_pool(
     '["im 22","from usa","let''s be friends"]',
 )
 
-# User is looking for a Boy / BF (aux_id == 3) -> Bot is Male (bot_g == 1)
 CACHED_STATE_BOY_BOT_M_POOL = _make_pool(
     22, "false", "state_looking_for_boy",
     (
@@ -265,7 +257,6 @@ CACHED_STATE_BOY_BOT_M_POOL = _make_pool(
     '["im 22","from usa","21 f"]',
 )
 
-# User is looking for General Dating / Relationship / Love (aux_id == 4)
 CACHED_STATE_DATING_POOL = _make_pool(
     22, "false", "state_looking_for_dating",
     (
@@ -296,7 +287,6 @@ CACHED_STATE_DATING_COMPLETE_POOL = _make_pool(
     '["ur cute","just chilling","wyd?"]',
 )
 
-# User is looking for Friends / Chat (aux_id == 1)
 CACHED_STATE_FRIENDS_POOL = _make_pool(
     22, "false", "state_looking_for_friends",
     (
@@ -412,7 +402,6 @@ def forward_step8(model, slot, n_words, has_q, age_val, country_id):
     has_any_direct = has_direct_f or has_direct_m or has_direct_rom or has_direct_fr
     has_any_verb = has_core_v or has_act_v
 
-    # Check if "here" + ("for"/"to"/"why"/"what") is present (e.g., "here to chat", "why r u here")
     has_here = False
     has_for_to = False
     for w_i in range(n_words):
@@ -423,7 +412,11 @@ def forward_step8(model, slot, n_words, has_q, age_val, country_id):
         elif (Lw == 3 and c0 == 102 and int(slot.words_mat[w_i, 1]) == 111) or (Lw == 2 and c0 == 116 and int(slot.words_mat[w_i, 1]) == 111):
             has_for_to = True
 
-    if not (has_core_v or has_any_direct or (has_act_v and (has_noun_f or has_noun_m or has_for_to or n_words >= 2)) or (has_here and (has_q_word or has_for_to))):
+    # Rule 13 Guard: Block false direct-noun + "here" combinations like "a bf here", "a gf here"
+    if has_here and not (has_any_verb or has_for_to or has_q_word):
+        return 0, 0, 0
+
+    if not (has_core_v or has_any_direct or (has_act_v and (has_noun_f or has_noun_m or has_for_to)) or (has_here and (has_q_word or has_for_to))):
         return 0, 0, 0
 
     np.take(eng.s8_bloom_q, slot.w_b_idx, out=slot.w_b_hits)
@@ -448,14 +441,12 @@ def forward_step8(model, slot, n_words, has_q, age_val, country_id):
     if max(s_ask, s_state) <= s0 + 0.1:
         return 0, 0, 0
 
-    # Find first verb or "here" position to separate subject prefix ("m", "f", "u") from target ("girl", "boy")
     v_idx = -1
     for w_i in range(n_words):
         if int(codes[w_i]) in (1, 9):
             v_idx = w_i
             break
 
-    # Check if 2nd-person pronoun ("u", "you") appears BEFORE the verb (e.g. "u looking for a girl?" -> Class 21)
     u_before_verb = False
     if v_idx > 0:
         for w_i in range(v_idx):
@@ -474,11 +465,9 @@ def forward_step8(model, slot, n_words, has_q, age_val, country_id):
     tgt_rom = has_direct_rom
     tgt_fr = has_direct_fr
 
-    # If no explicit target after verb (e.g. "looking for?", "wbu looking for"), it's Class 21 unless "here to chat/make friends"
     if not (tgt_f or tgt_m or tgt_rom or tgt_fr or (has_here and has_for_to) or (has_act_v and n_words >= 2)):
         return 21, 0, 0
 
-    # Determine self-gender prefix before the verb (e.g. "m looking for girl" -> self_g=10, "f looking for boy" -> self_g=20)
     self_g_off = 0
     if v_idx > 0:
         if int(codes[0]) == 7:
@@ -540,12 +529,32 @@ def route_step8(class_id, aux_id, users, uid, flags, prev_age, prev_country, bot
     return None
 
 
+def _snapshot_vault_hashes(vault_dict, exclude_prefix="s8_"):
+    snap = {}
+    for k, arr in vault_dict.items():
+        if not k.startswith(exclude_prefix):
+            snap[k] = (
+                hashlib.sha256(arr.tobytes()).hexdigest(),
+                arr.shape,
+                arr.dtype.str,
+            )
+    return snap
+
+
 def train_step8_into_vault(npz_path="model_weights.npz"):
     import torch
     import offline_train as ot
     import build_looking_for_txt
 
     build_looking_for_txt.build_looking_for_files()
+
+    # Rule 12 Cryptographic .NPZ Vault Lock: Snapshot SHA-256 of all existing Steps 1-7 keys
+    vault = {}
+    if os.path.exists(npz_path):
+        with np.load(npz_path, allow_pickle=False) as data:
+            for k in data.files:
+                vault[k] = data[k].copy()
+    pre_hashes = _snapshot_vault_hashes(vault, exclude_prefix="s8_")
 
     ram_arena = ot.verify_hardware_and_lock_ram()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -608,9 +617,6 @@ def train_step8_into_vault(npz_path="model_weights.npz"):
             if s:
                 sample_map[s] = (cls_id, np.float32(36.0))
                 s8_cnt += 1
-                clean_s = "".join(ch if ("a" <= ch <= "z" or ch == " " or ch == "'") else " " for ch in s)
-                for w in ot._collapse_word(clean_s).split():
-                    s8_bloom[hash_word(w)[:3]] = np.int8(1)
         if os.path.exists(fn):
             with open(fn, "r", encoding="ascii", errors="ignore") as f:
                 for line in f:
@@ -618,11 +624,10 @@ def train_step8_into_vault(npz_path="model_weights.npz"):
                     if s:
                         sample_map[s] = (cls_id, np.float32(24.0))
                         s8_cnt += 1
-                        clean_s = "".join(ch if ("a" <= ch <= "z" or ch == " " or ch == "'") else " " for ch in s)
-                        for w in ot._collapse_word(clean_s).split():
-                            s8_bloom[hash_word(w)[:3]] = np.int8(1)
 
+    # Rule 13: Explicit Negative Traps (Including false saves like "a bf here", "a gf here")
     for trap in ot.QUESTION_AND_REACTION_TRAPS + (
+        "a bf here", "a gf here", "a boyfriend here", "a girlfriend here",
         "what are you doing", "what r u doing", "what u up to", "wyd",
         "just chatting", "chatting", "im chatting", "im chat", "chilling",
         "u look good", "you look good", "u look cute", "ur cute", "u seem nice",
@@ -634,12 +639,6 @@ def train_step8_into_vault(npz_path="model_weights.npz"):
 
     q_emb, q_w1, q_w2, n = ot._train_word_mlp_head(sample_map, S8_CLASSES, 28, "STEP 8", device, wp_mat, use_qmark=True)
 
-    vault = {}
-    if os.path.exists(npz_path):
-        with np.load(npz_path, allow_pickle=False) as data:
-            for k in data.files:
-                vault[k] = data[k]
-
     vault.update(
         s8_emb_q=q_emb[0], s8_emb_s=q_emb[1],
         s8_w1_q=q_w1[0], s8_w1_s=q_w1[1],
@@ -648,10 +647,18 @@ def train_step8_into_vault(npz_path="model_weights.npz"):
     )
     np.savez(npz_path, **vault)
     del ram_arena
+
+    # Rule 12 Post-Save Cryptographic SHA-256 Verification
+    with np.load(npz_path, allow_pickle=False) as saved_arc:
+        post_vault = {k: saved_arc[k] for k in saved_arc.files}
+    post_hashes = _snapshot_vault_hashes(post_vault, exclude_prefix="s8_")
+    if pre_hashes != post_hashes:
+        raise RuntimeError("[RULE 12 VAULT BREACH] Existing Step 1-7 weights were altered!")
+
     size_kb = os.path.getsize(npz_path) / 1024.0
+    print(f"[RULE 12 VAULT SHIELD] Verified SHA-256 integrity of all {len(pre_hashes)} locked Step 1-7 arrays!", flush=True)
     print(f"[STEP 8 DONE] Locked Step 8 into '{npz_path}' ({s8_cnt} lines, {n} total, {size_kb:.2f} KB).", flush=True)
 
-    # Instant Built-In Zero-Fault Verification on User's Exact Test Cases
     global S8_ENGINE
     S8_ENGINE = None
     get_step8_engine(npz_path)
@@ -674,9 +681,11 @@ def train_step8_into_vault(npz_path="model_weights.npz"):
         (b"looking for friends or dating?", 21),
         (b"u looking for a girl?", 21),
         (b"friends?", 21),
+        (b"a bf here", 0),
+        (b"a gf here", 0),
     )
     passed = sum(1 for txt, exp in s8_tests if forward_pass(m_test, s_test, memoryview(txt))[0] == exp)
-    print(f"[STEP 8 VERIFICATION] Passed {passed}/{len(s8_tests)} tests (including 'm looking for girl , u' & 'lm finding gril')!", flush=True)
+    print(f"[STEP 8 ZERO-FAULT SUITE] Passed {passed}/{len(s8_tests)} tests (including blocking 'a bf here')!", flush=True)
 
 
 if __name__ == "__main__":

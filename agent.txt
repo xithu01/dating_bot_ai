@@ -192,3 +192,6 @@ python offline_train.py --step1
 
 !python build_looking_for_txt.py
 !python step8_looking_for.py
+
+python build_name_txt.py
+python step9_name.py
