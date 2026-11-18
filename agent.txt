@@ -170,7 +170,7 @@ Reply with 1, 2, 3, 4, or your custom Step 7 idea, and I will immediately output
 
 
 python offline_train.py --step1
-
+     ds = load_dataset("daily_dialog", split="train", streaming=True)
 # 1. Regenerate separated greetings.txt, negatives.txt, ages.txt, countries.txt & new hru.txt:
 !python build_greetings_txt.py
 !python build_age_country_txt.py
@@ -189,3 +189,6 @@ python offline_train.py --step1
 
 !python build_flirt_react_txt.py
 !python offline_train.py --step7
+
+!python build_looking_for_txt.py
+!python step8_looking_for.py

@@ -604,6 +604,9 @@ def handle_user_query(model, slot, users, uid, mv_payload, forward_pass_fn):
         users.conv_flags[uid] = np.uint8(flags | FLAG_GREETED)
         return CACHED_REACT_ACK_COMPLETE_POOL[rot8] if (prev_age >= 18 and prev_country > 0) else CACHED_REACT_ACK_POOL[rot8]
 
+    if class_id in (21, 22):
+        from step8_looking_for import route_step8
+        return route_step8(class_id, aux_id, users, uid, flags, prev_age, prev_country, bot_g, rot8)
     return CACHED_REJECT_RESPONSE
 
 
