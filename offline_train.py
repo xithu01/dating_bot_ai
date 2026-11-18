@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # FILE: offline_train.py
-# PURPOSE: Unified Step 1, 2, 3, and 4 Vault Trainer (Zero-Leak Gender LUTs + Full Vault Protection)
-# RULES: Enforces Rules 1-11 (Zero float64/int64, 1s ETA, RAM Super-Arena, Self-Healing Datasets)
-# NOTE: PyArmor line limits apply ONLY to production_server.py per System Rule 7.
+# PURPOSE: Unified Step 1, 2, 3, 4, 5 & 6 Vault Trainer (Zero-Leak Negative Filtering + Self-Healing Datasets)
+# RULES: Enforces Rules 1-11 (Zero float64/int64, 1s ETA, RAM Super-Arena, Full Vault Protection)
+# NOTE: PyArmor line limits apply ONLY to production_server.py & production_server_part2.py per System Rule 7.
 
 import logging
 import os
@@ -42,7 +42,9 @@ S2_VOCAB = 1024
 S2_DIM = 32
 S2_CLASSES = 6
 S3_CLASSES = 2
-S4_CLASSES = 7  # 0=Reject, 1=Choice, 2=IsFemale, 3=IsMale, 4=StateFemale, 5=StateMale, 6=AgeGender
+S4_CLASSES = 7  # 0=Reject, 1=Choice(9), 2=IsFemale(10), 3=IsMale(11), 4=StateFemale(12), 5=StateMale(13), 6=AgeGender(14)
+S5_CLASSES = 2  # 0=Reject, 1=AskWYD(15)
+S6_CLASSES = 4  # 0=Reject, 1=StatusPos(16), 2=StatusNeg(17), 3=StatusAskBack(18)
 BATCH_SIZE = 512
 
 CLEAN_RE = re.compile(r"^[a-z\s'!?.,/]+$")
@@ -52,6 +54,7 @@ ASK_FROM_RE = re.compile(
     re.IGNORECASE,
 )
 ADULT_AGE_RE = re.compile(r"\b(1[89]|[2-7][0-9]|80)\b")
+AGE_GENDER_LEAK_RE = re.compile(r"\b(1[89]|[2-7][0-9]|80)\s*[mf]\b", re.IGNORECASE)
 
 GREETING_ROOT_SET = frozenset((
     "hi", "hii", "hiii", "hiiii", "hiiiii", "hey", "heyy", "heyyy", "heyyyy", "heey", "heeyy",
@@ -78,8 +81,8 @@ BUILTIN_GREETINGS = CORE_SHORT_GREETINGS + (
     "good morning", "good afternoon", "good evening", "good day", "salutations",
     "nice to meet you", "nice to meet u", "pleased to meet you", "glad to meet you",
     "good to see you", "long time no see", "hey there", "hi there", "hello there",
-    "yo there", "hey stranger", "hi stranger", "sup bro", "hi nice to meet you",
-    "hello good morning", "yo what's up", "howdy partner", "greetings friend",
+    "yo there", "hey stranger", "hi stranger", "sup bro", "hey man", "hi man", "yo man",
+    "hi nice to meet you", "hello good morning", "yo what's up", "howdy partner", "greetings friend",
 )
 
 QUESTION_AND_REACTION_TRAPS = (
@@ -94,6 +97,9 @@ HARD_NEGATIVES = QUESTION_AND_REACTION_TRAPS + (
     "how are you", "how are you?", "how are you!", "hru", "hru?", "hru!", "hyd", "hyd!",
     "how r u", "how are u", "how u doing", "how's it going", "hows it going", "how was your day",
     "hor", "how ar you dopin", "how u doin", "hw r u", "how whas you da", "doing", "going", "wbu", "hbu",
+    "wyd", "wyd?", "wud", "what are you doing", "what u doing", "what r u doing", "what u up to",
+    "im good", "i'm good", "doing good", "im chat", "chatting", "chilling", "just chilling in bed",
+    "bored", "borad", "lm borad", "im bored", "nothing much", "nothing much just bored", "nm", "nmu",
     "tunis", "tuinsi", "tunsia", "tounsi", "tounsia", "tun", "tn", "handi", "hindi", "ind", "inida",
     "hyw", "hyk", "hyb", "hypx", "hya", "ih", "ie", "iphey", "xhey", "hix", "hellod", "hellox",
     "f or m", "m or f", "m/f", "f/m", "f?", "m?", "girl?", "boy?", "male", "female", "famle",
@@ -128,7 +134,6 @@ COUNTRY_GROUPS = (
     (19, ("brazil", "br", "brasil", "brazilian", "rio")),
 )
 
-# Step 2 framing words (strictly age/country/greeting framing; gender anchors handled by Step 4 LUT)
 VALID_S2_FRAMING_WORDS = (
     "hi", "hey", "helo", "hlo", "hy", "hie", "hei", "hiya", "heya", "hulo", "elo",
     "yo", "sup", "wasup", "wazup", "whazup", "howdy", "gretings", "greeting",
@@ -144,8 +149,7 @@ VALID_S2_FRAMING_WORDS = (
     "where", "country", "which", "and", "about",
 )
 
-# Step 4 Gender Anchor & Framing Word Groups (for O(1) s4_gender_lut_a / s4_gender_lut_b)
-# Code 1 = Male anchor, Code 2 = Female anchor, Code 3 = Neutral gender anchor, Code 4 = 2nd-person/Question frame, Code 5 = 1st-person/Statement frame
+# Step 4 O(1) Gender Anchor & Framing Lookup Groups
 MALE_ANCHOR_WORDS = ("m", "male", "maale", "mael", "boy", "boi", "man", "masculine", "guy", "dude")
 FEMALE_ANCHOR_WORDS = ("f", "female", "famle", "famel", "femael", "femle", "girl", "gril", "gurl", "woman", "womman", "feminine", "w", "lady")
 NEUTRAL_GENDER_WORDS = ("gender", "gander", "gnder", "sex")
@@ -154,6 +158,34 @@ GENDER_STATEMENT_FRAME_WORDS = (
     "im", "i'm", "l'm", "lm", "iam", "i'am", "i", "am", "me", "here", "a", "an", "or",
     "hi", "hey", "helo", "hlo", "elo", "yo", "sup", "hiya", "heya", "howdy", "hy",
 )
+ALL_GENDER_ANCHOR_SET = frozenset(MALE_ANCHOR_WORDS + FEMALE_ANCHOR_WORDS + NEUTRAL_GENDER_WORDS)
+HRU_TOKEN_SET = frozenset(("hru", "hyd", "hor", "wbu", "hbu", "doing", "doin", "dopin", "diong", "going", "goin"))
+WYD_TOKEN_SET = frozenset(("wyd", "wud", "whatcha", "doing", "doin", "diong", "dopin"))
+
+# Step 6 O(1) Status & Activity Anchor Lookup Groups
+# 1 = Positive Mood/Activity Anchor, 2 = Negative/Bored/Nothing Anchor, 3 = Ask-Back Anchor, 4 = Status Framing Word
+STATUS_POS_ANCHOR_WORDS = (
+    "good", "great", "fine", "alright", "well", "ok", "okay", "awesome", "amazing", "fantastic", "happy",
+    "chat", "chatting", "chatin", "chating", "talking", "chilling", "chillin", "chiling",
+    "relaxing", "resting", "bed", "laying", "lying", "home", "working", "work", "busy",
+    "studying", "reading", "listening", "music", "watching", "tv", "movie", "movies",
+    "youtube", "netflix", "gaming", "playing", "games", "game", "scrolling", "phone",
+    "eating", "cooking", "drinking", "coffee",
+)
+STATUS_NEG_ANCHOR_WORDS = (
+    "bored", "borad", "boerd", "borde", "bord", "broed", "tired", "tierd", "tird",
+    "sleepy", "exhausted", "sad", "lonely", "bad", "sick", "stressed",
+    "nothing", "nothin", "nth", "nada", "nm",
+)
+STATUS_ASK_BACK_WORDS = ("u", "you", "wbu", "hbu", "nmu", "hru", "hyd", "wyd", "wud")
+STATUS_FRAME_WORDS = (
+    "im", "i'm", "l'm", "lm", "iam", "i'am", "i", "am", "doing", "doin", "diong", "just",
+    "so", "very", "super", "hella", "feeling", "all", "pretty", "not", "much", "really",
+    "special", "anything", "same", "in", "at", "on", "my", "to", "a", "bit", "down",
+    "here", "staying", "cant", "can't", "sleep", "rn", "now", "today", "thanks", "thx",
+    "ty", "lol", "haha", "and", "how", "what", "about", "hi", "hey", "hello", "yo",
+)
+ALL_STATUS_ANCHOR_SET = frozenset(STATUS_POS_ANCHOR_WORDS + STATUS_NEG_ANCHOR_WORDS + ("nmu",))
 
 BUILTIN_GENDER_CHOICE = (
     "m or f", "m or f?", "f or m", "f or m?", "m/f", "f/m", "m f", "f m", "m f?", "f m?",
@@ -165,12 +197,12 @@ BUILTIN_GENDER_CHOICE = (
     "what gender are you", "what is your gender", "whats your gender", "what's your gender",
     "your gender", "ur gender", "u gender", "gender", "gender?", "your sex", "what sex are you",
     "are you male or female", "are you female or male", "are you a male or female",
-    "are you a female or male", "which gender are you", "which sex are you",
-    "what are you male or female", "tell me your gender",
+    "are you a female or male", "are you a boy or girl", "which gender are you",
+    "which sex are you", "what are you male or female", "tell me your gender",
 )
 
 BUILTIN_GENDER_ASK_F = (
-    "f?", "girl?", "female?", "woman?", "w?", "famle?", "are you a girl", "are you a girl?",
+    "f?", "girl?", "female?", "woman?", "w?", "famle?", "u f?", "are you a girl", "are you a girl?",
     "are you girl", "are u a girl", "are u girl", "you a girl?", "r u a girl", "r u girl",
     "you a girl", "u a girl", "ur a girl", "your a girl", "are you female", "are u female",
     "r u female", "you female", "u female", "are you a female", "are u a female", "r u a female",
@@ -181,7 +213,7 @@ BUILTIN_GENDER_ASK_F = (
 )
 
 BUILTIN_GENDER_ASK_M = (
-    "m?", "boy?", "male?", "man?", "are you a boy", "are you a boy?", "are you boy",
+    "m?", "boy?", "male?", "man?", "u m?", "are you a boy", "are you a boy?", "are you boy",
     "are u a boy", "are u boy", "r u a boy", "r u boy", "you a boy", "u a boy",
     "ur a boy", "your a boy", "are you male", "are u male", "r u male", "you male",
     "u male", "are you a male", "are u a male", "r u a male", "r you a boy", "r you boy",
@@ -192,15 +224,54 @@ BUILTIN_GENDER_ASK_M = (
 
 BUILTIN_GENDER_STATE_F = (
     "f", "female", "famle", "famel", "femael", "femle", "girl", "gril", "gurl",
-    "woman", "womman", "w", "f here", "female here", "girl here", "im a girl",
-    "i'm a girl", "i am a girl", "im female", "i'm female", "im famle", "im a woman",
-    "i'm a woman", "im girl",
+    "woman", "womman", "w", "f here", "female here", "girl here", "hi f", "hey f",
+    "hi f here", "im a girl", "i'm a girl", "i am a girl", "im female", "i'm female",
+    "im famle", "im a woman", "i'm a woman", "im girl",
 )
 
 BUILTIN_GENDER_STATE_M = (
     "m", "male", "maale", "mael", "boy", "boi", "man", "m here", "male here",
-    "boy here", "im a boy", "i'm a boy", "i am a boy", "im male", "i'm male",
-    "im a man", "i'm a man", "im boy",
+    "boy here", "hi m", "hey m", "hi m here", "im a boy", "i'm a boy", "i am a boy",
+    "im male", "i'm male", "im a man", "i'm a man", "im boy",
+)
+
+BUILTIN_WYD = (
+    "wyd", "wyd?", "wud", "wud?", "what are you doing", "what are you doing?", "what r u doing",
+    "what r u doing?", "what are u doing", "what u doing", "what u doing?", "what ya doing",
+    "what are you doin", "what r u doin", "what u doin", "whatcha doing", "whatcha doin",
+    "what are you up to", "what r u up to", "what u up to", "what u up to?", "whatcha up to",
+    "doing anything", "doing anything fun", "wat u doing", "wht u doing", "what u diong",
+    "wyd rn", "what u doing rn", "hi wyd", "hey wyd", "hey what u doing",
+)
+
+BUILTIN_STATUS_POS = (
+    "im good", "i'm good", "i am good", "lm good", "good", "doing good", "doin good",
+    "im doing good", "im great", "doing great", "im fine", "fine", "all good", "pretty good",
+    "im ok", "im okay", "not bad", "im chat", "im chatting", "chatting", "just chatting",
+    "just chat", "chilling", "chillin", "just chilling", "im chilling", "chilling in bed",
+    "just chilling in bed", "just chillin in bed", "relaxing", "just relaxing", "in bed",
+    "just in bed", "laying in bed", "at home", "working", "just working", "studying",
+    "listening to music", "watching tv", "watching a movie", "gaming", "scrolling",
+)
+
+BUILTIN_STATUS_NEG = (
+    "bored", "borad", "boerd", "borde", "im bored", "i'm bored", "i am bored", "lm bored",
+    "lm borad", "im borad", "l'm borad", "just bored", "just borad", "so bored", "so borad",
+    "very bored", "feeling bored", "bored in bed", "nothing", "nothin", "nothing much",
+    "nothin much", "not much", "nm", "doing nothing", "not doing much",
+    "nothing much just bored", "nothing much just borad", "not much just bored",
+    "nothing just bored", "in bed bored", "tired", "im tired", "lm tired", "just tired",
+    "so tired", "sleepy", "im sleepy", "sad", "im sad", "lonely", "im lonely",
+)
+
+BUILTIN_STATUS_ASK_BACK = (
+    "im good u", "im good u?", "i'm good u?", "lm good u", "lm good u?", "good u", "good u?",
+    "doing good u?", "im good wbu", "im good wbu?", "good wbu?", "im good hbu?", "im good and u?",
+    "im great u?", "im fine u?", "all good u?", "im chat u?", "chatting u?", "chilling u?",
+    "chilling wbu?", "just chilling u?", "just chilling in bed u?", "in bed u?",
+    "bored u", "bored u?", "im bored u?", "lm borad u", "lm borad u?", "im borad u?",
+    "just bored u?", "bored wbu?", "nothing much u", "nothing much u?", "nothing much wbu?",
+    "not much u?", "not much wbu?", "nm u", "nm u?", "nmu", "nmu?", "tired u?",
 )
 
 
@@ -249,20 +320,25 @@ def quantize_to_int8(w_fp32):
 
 
 def ensure_dataset_files():
-    if not os.path.exists("greetings.txt") or not os.path.exists("negatives.txt"):
-        try:
-            import build_greetings_txt
-            if hasattr(build_greetings_txt, "generate_datasets"):
-                build_greetings_txt.generate_datasets("greetings.txt", "negatives.txt")
-            elif hasattr(build_greetings_txt, "generate_greetings_file"):
-                build_greetings_txt.generate_greetings_file("greetings.txt")
-        except Exception:
-            pass
-    if not os.path.exists("ages.txt") or not os.path.exists("countries.txt"):
+    ages_dirty = False
+    if os.path.exists("ages.txt"):
+        with open("ages.txt", "r", encoding="ascii", errors="ignore") as fa:
+            for line in fa:
+                if AGE_GENDER_LEAK_RE.search(line):
+                    ages_dirty = True
+                    break
+    if ages_dirty or not os.path.exists("ages.txt") or not os.path.exists("countries.txt"):
         try:
             import build_age_country_txt
             if hasattr(build_age_country_txt, "build_age_and_country_files"):
                 build_age_country_txt.build_age_and_country_files()
+        except Exception:
+            pass
+    if not os.path.exists("greetings.txt") or not os.path.exists("negatives.txt"):
+        try:
+            import build_greetings_txt
+            if hasattr(build_greetings_txt, "generate_greetings_and_negatives"):
+                build_greetings_txt.generate_greetings_and_negatives("greetings.txt", "negatives.txt")
         except Exception:
             pass
     if not os.path.exists("hru.txt"):
@@ -279,13 +355,31 @@ def ensure_dataset_files():
                 build_gender_txt.generate_all_gender_files()
         except Exception:
             pass
-    # Self-healing fallback if gender .txt files do not exist yet on disk
+    if not os.path.exists("wyd.txt"):
+        try:
+            import build_wyd_txt
+            if hasattr(build_wyd_txt, "build_wyd_file"):
+                build_wyd_txt.build_wyd_file("wyd.txt")
+        except Exception:
+            pass
+    if not os.path.exists("status_positive.txt") or not os.path.exists("status_negative.txt") or not os.path.exists("status_ask_back.txt"):
+        try:
+            import build_status_txt
+            if hasattr(build_status_txt, "build_all_status_files"):
+                build_status_txt.build_all_status_files()
+        except Exception:
+            pass
+
     fallback_files = (
         ("gender_ask_choice.txt", BUILTIN_GENDER_CHOICE),
         ("gender_ask_is_female.txt", BUILTIN_GENDER_ASK_F),
         ("gender_ask_is_male.txt", BUILTIN_GENDER_ASK_M),
         ("gender_state_female.txt", BUILTIN_GENDER_STATE_F),
         ("gender_state_male.txt", BUILTIN_GENDER_STATE_M),
+        ("wyd.txt", BUILTIN_WYD),
+        ("status_positive.txt", BUILTIN_STATUS_POS),
+        ("status_negative.txt", BUILTIN_STATUS_NEG),
+        ("status_ask_back.txt", BUILTIN_STATUS_ASK_BACK),
     )
     for fn, items in fallback_files:
         if not os.path.exists(fn):
@@ -476,16 +570,17 @@ def train_step1_into_vault(vault, device):
 
     neg_w = {}
     neg_files = (
-        "negatives.txt", "hru.txt", "countries.txt", "ages.txt", "underage_traps.txt",
+        "negatives.txt", "hru.txt", "wyd.txt", "countries.txt", "ages.txt", "underage_traps.txt",
         "gender_ask_choice.txt", "gender_ask_is_female.txt", "gender_ask_is_male.txt",
         "gender_state_female.txt", "gender_state_male.txt",
+        "status_positive.txt", "status_negative.txt", "status_ask_back.txt",
     )
     for nf in neg_files:
         if os.path.exists(nf):
             with open(nf, "r", encoding="ascii", errors="ignore") as f:
                 for line in f:
                     s = " ".join(line.strip().lower().split())
-                    if s and s not in pos_w and len(neg_w) < 9000 and CLEAN_RE.match(s):
+                    if s and s not in pos_w and len(neg_w) < 11000 and CLEAN_RE.match(s):
                         words = [w.strip("'!?.,/") for w in s.split()]
                         if not any(w in GREETING_ROOT_SET for w in words):
                             neg_w[s[:MAX_GREETING_LEN]] = np.float32(2.0)
@@ -607,21 +702,22 @@ def train_step2_into_vault(vault, device):
 
     sample_map = {t: (0, np.float32(35.0)) for t in QUESTION_AND_REACTION_TRAPS}
     for gf in (
-        "greetings.txt", "negatives.txt", "hru.txt", "gender_ask_choice.txt",
-        "gender_ask_is_female.txt", "gender_ask_is_male.txt",
+        "greetings.txt", "negatives.txt", "hru.txt", "wyd.txt",
+        "gender_ask_choice.txt", "gender_ask_is_female.txt", "gender_ask_is_male.txt",
         "gender_state_female.txt", "gender_state_male.txt",
+        "status_positive.txt", "status_negative.txt", "status_ask_back.txt",
     ):
         if os.path.exists(gf):
             with open(gf, "r", encoding="ascii", errors="ignore") as f:
                 for line in f:
                     s = " ".join(line.strip().lower().split())
-                    if s and len(s) <= 40 and not ASK_AGE_RE.search(s) and not ASK_FROM_RE.search(s) and len(sample_map) < 9000:
+                    if s and len(s) <= 40 and not ASK_AGE_RE.search(s) and not ASK_FROM_RE.search(s) and len(sample_map) < 11000:
                         sample_map[s] = (0, np.float32(2.0))
     if os.path.exists("ages.txt"):
         with open("ages.txt", "r", encoding="ascii", errors="ignore") as fa:
             for line in fa:
                 s = " ".join(line.strip().lower().split())
-                if s:
+                if s and not AGE_GENDER_LEAK_RE.search(s):
                     sample_map[s] = (1, np.float32(25.0)) if ASK_AGE_RE.search(s) else (2, np.float32(8.0))
     if os.path.exists("countries.txt"):
         with open("countries.txt", "r", encoding="ascii", errors="ignore") as fc:
@@ -655,14 +751,17 @@ def train_step3_into_vault(vault, device):
     sample_map = {}
     for gf in (
         "greetings.txt", "ages.txt", "countries.txt", "negatives.txt", "underage_traps.txt",
-        "gender_ask_choice.txt", "gender_ask_is_female.txt", "gender_ask_is_male.txt",
+        "wyd.txt", "gender_ask_choice.txt", "gender_ask_is_female.txt", "gender_ask_is_male.txt",
+        "status_positive.txt", "status_negative.txt",
     ):
         if os.path.exists(gf):
             with open(gf, "r", encoding="ascii", errors="ignore") as f:
                 for line in f:
                     s = " ".join(line.strip().lower().split())
-                    if s and len(sample_map) < 10000:
-                        sample_map[s] = (0, np.float32(2.0))
+                    if s and len(sample_map) < 11000:
+                        toks = [w.strip("'!?.,/") for w in s.split()]
+                        if not any(w in HRU_TOKEN_SET for w in toks) and not s.startswith("how "):
+                            sample_map[s] = (0, np.float32(2.0))
 
     hru_cnt = 0
     if os.path.exists("hru.txt"):
@@ -678,6 +777,7 @@ def train_step3_into_vault(vault, device):
 
     for trap in QUESTION_AND_REACTION_TRAPS + (
         "how old are you", "how old r u", "where are you from", "where r u from",
+        "what are you doing", "what u doing", "wyd", "doing good", "im doing good",
         "hi", "hi hi", "hy", "hyy", "hey", "hello", "yo", "sup",
         "m?", "f?", "m or f?", "are you a girl?", "are you a boy?",
     ):
@@ -707,7 +807,6 @@ def train_step4_into_vault(vault, device):
         w_vec[15] = np.int32(L)
         return (w_vec @ wp_mat) & b_mask
 
-    # Populate dual O(1) Gender Anchor & Framing LUTs (1=Male, 2=Female, 3=NeutralGender, 4=QuestionFrame, 5=StatementFrame)
     for code_val, word_group in (
         (5, GENDER_STATEMENT_FRAME_WORDS),
         (4, GENDER_QUESTION_FRAME_WORDS),
@@ -722,25 +821,38 @@ def train_step4_into_vault(vault, device):
             s4_gender_bloom[h4[:3]] = np.int8(1)
 
     sample_map = {}
-    for gf in ("greetings.txt", "ages.txt", "countries.txt", "hru.txt", "negatives.txt", "underage_traps.txt"):
+    for gf in (
+        "greetings.txt", "ages.txt", "countries.txt", "hru.txt", "wyd.txt",
+        "negatives.txt", "underage_traps.txt", "status_positive.txt", "status_negative.txt",
+    ):
         if os.path.exists(gf):
             with open(gf, "r", encoding="ascii", errors="ignore") as f:
                 for line in f:
                     s = " ".join(line.strip().lower().split())
                     if s and len(sample_map) < 15000:
-                        sample_map[s] = (0, np.float32(2.0))
+                        toks = [w.strip("'!?.,/") for w in s.replace("/", " ").split()]
+                        if not any(w in ALL_GENDER_ANCHOR_SET for w in toks) and not AGE_GENDER_LEAK_RE.search(s):
+                            sample_map[s] = (0, np.float32(2.0))
 
     pos_classes = (
-        ("gender_ask_choice.txt", 1),
-        ("gender_ask_is_female.txt", 2),
-        ("gender_ask_is_male.txt", 3),
-        ("gender_state_female.txt", 4),
-        ("gender_state_male.txt", 5),
-        ("age_gender.txt", 6),
+        ("gender_ask_choice.txt", 1, BUILTIN_GENDER_CHOICE),
+        ("gender_ask_is_female.txt", 2, BUILTIN_GENDER_ASK_F),
+        ("gender_ask_is_male.txt", 3, BUILTIN_GENDER_ASK_M),
+        ("gender_state_female.txt", 4, BUILTIN_GENDER_STATE_F),
+        ("gender_state_male.txt", 5, BUILTIN_GENDER_STATE_M),
+        ("age_gender.txt", 6, ()),
     )
 
     gender_cnt = 0
-    for file_name, cls_id in pos_classes:
+    for file_name, cls_id, builtins in pos_classes:
+        for b_line in builtins:
+            s = " ".join(b_line.strip().lower().split())
+            if s:
+                sample_map[s] = (cls_id, np.float32(30.0))
+                gender_cnt += 1
+                clean_s = "".join(ch if ("a" <= ch <= "z" or ch == " " or ch == "'") else " " for ch in s)
+                for w in _collapse_word(clean_s).split():
+                    s4_gender_bloom[hash_word(w)[:3]] = np.int8(1)
         if os.path.exists(file_name):
             with open(file_name, "r", encoding="ascii", errors="ignore") as f:
                 for line in f:
@@ -753,7 +865,8 @@ def train_step4_into_vault(vault, device):
                             s4_gender_bloom[hash_word(w)[:3]] = np.int8(1)
 
     for trap in QUESTION_AND_REACTION_TRAPS + (
-        "how old are you?", "where are you from?", "how are you?", "hru?", "age?", "from?", "country?",
+        "how old are you?", "where are you from?", "how are you?", "hru?", "wyd?", "age?", "from?", "country?",
+        "hey man", "hi man", "yo man", "m bi", "u d?", "im good", "lm borad",
     ):
         sample_map[trap] = (0, np.float32(60.0))
 
@@ -766,7 +879,167 @@ def train_step4_into_vault(vault, device):
     print(f"[STEP 4 DONE] Locked Step 4 Gender head & LUTs ({gender_cnt} gender lines, {n} total) into vault.", flush=True)
 
 
-def run_vault_trainer(output_path="model_weights.npz", force_s1=False, force_s2=False, force_s3=False, force_s4=False):
+def train_step5_into_vault(vault, device):
+    wp_mat = _get_wp_mat()
+    s5_wyd_bloom = np.zeros((BLOOM_SIZE,), dtype=np.int8)
+    b_mask = np.int32(BLOOM_SIZE - 1)
+    w_vec = np.zeros((16,), dtype=np.int32)
+
+    def hash_word(w_str):
+        b = np.frombuffer(w_str.encode("ascii", errors="ignore"), dtype=np.uint8)
+        L = min(int(b.shape[0]), 15)
+        w_vec.fill(0)
+        w_vec[:L] = b[:L]
+        w_vec[15] = np.int32(L)
+        return (w_vec @ wp_mat) & b_mask
+
+    sample_map = {}
+    for gf in (
+        "greetings.txt", "ages.txt", "countries.txt", "hru.txt", "negatives.txt",
+        "gender_ask_choice.txt", "status_positive.txt", "status_negative.txt", "status_ask_back.txt",
+    ):
+        if os.path.exists(gf):
+            with open(gf, "r", encoding="ascii", errors="ignore") as f:
+                for line in f:
+                    s = " ".join(line.strip().lower().split())
+                    if s and len(sample_map) < 12000:
+                        toks = [w.strip("'!?.,/") for w in s.split()]
+                        if not any(w in WYD_TOKEN_SET for w in toks) and "up to" not in s:
+                            sample_map[s] = (0, np.float32(2.0))
+
+    wyd_cnt = 0
+    for b_line in BUILTIN_WYD:
+        s = " ".join(b_line.strip().lower().split())
+        if s:
+            wyd_cnt += 1
+            sample_map[s] = (1, np.float32(28.0))
+            clean_s = "".join(ch if ("a" <= ch <= "z" or ch == " " or ch == "'") else " " for ch in s)
+            for w in _collapse_word(clean_s).split():
+                s5_wyd_bloom[hash_word(w)[:3]] = np.int8(1)
+
+    if os.path.exists("wyd.txt"):
+        with open("wyd.txt", "r", encoding="ascii", errors="ignore") as fw:
+            for line in fw:
+                s = " ".join(line.strip().lower().split())
+                if s:
+                    wyd_cnt += 1
+                    sample_map[s] = (1, np.float32(22.0))
+                    clean_s = "".join(ch if ("a" <= ch <= "z" or ch == " " or ch == "'") else " " for ch in s)
+                    for w in _collapse_word(clean_s).split():
+                        s5_wyd_bloom[hash_word(w)[:3]] = np.int8(1)
+
+    for trap in QUESTION_AND_REACTION_TRAPS + (
+        "how are you", "how are you doing", "how r u doing", "how u doing", "how u doin",
+        "whats up", "what's up", "what is up", "what are you", "what r u", "are you",
+        "doing good", "doing great", "doing fine", "doing nothing", "not doing much",
+        "hi", "hey", "hello", "yo", "sup",
+    ):
+        sample_map[trap] = (0, np.float32(60.0))
+
+    q_emb, q_w1, q_w2, n = _train_word_mlp_head(sample_map, S5_CLASSES, 26, "STEP 5", device, wp_mat)
+    vault.update(
+        s5_emb_q=q_emb[0], s5_emb_s=q_emb[1], s5_w1_q=q_w1[0], s5_w1_s=q_w1[1],
+        s5_w2_q=q_w2[0], s5_w2_s=q_w2[1], s5_wyd_bloom_q=s5_wyd_bloom,
+    )
+    print(f"[STEP 5 DONE] Locked Step 5 ask_wyd head ({wyd_cnt} wyd.txt lines, {n} total) into vault.", flush=True)
+
+
+def train_step6_into_vault(vault, device):
+    wp_mat = _get_wp_mat()
+    s6_status_bloom = np.zeros((BLOOM_SIZE,), dtype=np.int8)
+    s6_status_lut_a = np.zeros((BLOOM_SIZE,), dtype=np.uint8)
+    s6_status_lut_b = np.zeros((BLOOM_SIZE,), dtype=np.uint8)
+    b_mask = np.int32(BLOOM_SIZE - 1)
+    w_vec = np.zeros((16,), dtype=np.int32)
+
+    def hash_word(w_str):
+        b = np.frombuffer(w_str.encode("ascii", errors="ignore"), dtype=np.uint8)
+        L = min(int(b.shape[0]), 15)
+        w_vec.fill(0)
+        w_vec[:L] = b[:L]
+        w_vec[15] = np.int32(L)
+        return (w_vec @ wp_mat) & b_mask
+
+    # Populate O(1) Status Anchor LUTs: 4=Framing, 3=AskBack, 1=Positive, 2=Negative (Negative/AskBack take priority over framing)
+    for code_val, word_group in (
+        (4, STATUS_FRAME_WORDS),
+        (3, STATUS_ASK_BACK_WORDS),
+        (1, STATUS_POS_ANCHOR_WORDS),
+        (2, STATUS_NEG_ANCHOR_WORDS),
+    ):
+        for w in word_group:
+            h4 = hash_word(_collapse_word(w))
+            s6_status_lut_a[h4[0]] = np.uint8(code_val)
+            s6_status_lut_b[h4[1]] = np.uint8(code_val)
+            s6_status_bloom[h4[:3]] = np.int8(1)
+
+    sample_map = {}
+    for gf in (
+        "greetings.txt", "ages.txt", "countries.txt", "hru.txt", "wyd.txt",
+        "negatives.txt", "gender_ask_choice.txt", "gender_ask_is_female.txt",
+        "gender_ask_is_male.txt", "gender_state_female.txt", "gender_state_male.txt",
+    ):
+        if os.path.exists(gf):
+            with open(gf, "r", encoding="ascii", errors="ignore") as f:
+                for line in f:
+                    s = " ".join(line.strip().lower().split())
+                    if s and len(sample_map) < 14000:
+                        toks = [w.strip("'!?.,/") for w in s.split()]
+                        if not any(w in ALL_STATUS_ANCHOR_SET for w in toks):
+                            sample_map[s] = (0, np.float32(2.0))
+
+    status_classes = (
+        ("status_positive.txt", 1, BUILTIN_STATUS_POS),
+        ("status_negative.txt", 2, BUILTIN_STATUS_NEG),
+        ("status_ask_back.txt", 3, BUILTIN_STATUS_ASK_BACK),
+    )
+
+    status_cnt = 0
+    for file_name, cls_id, builtins in status_classes:
+        for b_line in builtins:
+            s = " ".join(b_line.strip().lower().split())
+            if s:
+                sample_map[s] = (cls_id, np.float32(32.0))
+                status_cnt += 1
+                clean_s = "".join(ch if ("a" <= ch <= "z" or ch == " " or ch == "'") else " " for ch in s)
+                for w in _collapse_word(clean_s).split():
+                    s6_status_bloom[hash_word(w)[:3]] = np.int8(1)
+        if os.path.exists(file_name):
+            with open(file_name, "r", encoding="ascii", errors="ignore") as f:
+                for line in f:
+                    s = " ".join(line.strip().lower().split())
+                    if s:
+                        sample_map[s] = (cls_id, np.float32(24.0))
+                        status_cnt += 1
+                        clean_s = "".join(ch if ("a" <= ch <= "z" or ch == " " or ch == "'") else " " for ch in s)
+                        for w in _collapse_word(clean_s).split():
+                            s6_status_bloom[hash_word(w)[:3]] = np.int8(1)
+
+    for trap in QUESTION_AND_REACTION_TRAPS + (
+        "how are you", "how r u", "hru", "hyd", "wyd", "what are you doing", "what u doing",
+        "good morning", "good afternoon", "good evening", "good day", "good night", "good luck", "good job",
+        "hi", "hey", "hello", "yo", "sup", "whats up", "what's up", "age?", "from?", "m or f?",
+    ):
+        sample_map[trap] = (0, np.float32(60.0))
+
+    q_emb, q_w1, q_w2, n = _train_word_mlp_head(sample_map, S6_CLASSES, 28, "STEP 6", device, wp_mat, use_qmark=True)
+    vault.update(
+        s6_emb_q=q_emb[0], s6_emb_s=q_emb[1], s6_w1_q=q_w1[0], s6_w1_s=q_w1[1],
+        s6_w2_q=q_w2[0], s6_w2_s=q_w2[1], s6_status_bloom_q=s6_status_bloom,
+        s6_status_lut_a=s6_status_lut_a, s6_status_lut_b=s6_status_lut_b,
+    )
+    print(f"[STEP 6 DONE] Locked Step 6 Status head & LUTs ({status_cnt} status lines, {n} total) into vault.", flush=True)
+
+
+def run_vault_trainer(
+    output_path="model_weights.npz",
+    force_s1=False,
+    force_s2=False,
+    force_s3=False,
+    force_s4=False,
+    force_s5=False,
+    force_s6=False,
+):
     ensure_dataset_files()
     vault = {}
     if os.path.exists(output_path):
@@ -778,9 +1051,11 @@ def run_vault_trainer(output_path="model_weights.npz", force_s1=False, force_s2=
     need_s2 = force_s2 or ("s2_country_lut_a" not in vault)
     need_s3 = force_s3 or ("s3_w2_q" not in vault)
     need_s4 = force_s4 or ("s4_w2_q" not in vault) or ("s4_gender_lut_a" not in vault)
+    need_s5 = force_s5 or ("s5_w2_q" not in vault) or ("s5_wyd_bloom_q" not in vault)
+    need_s6 = force_s6 or ("s6_w2_q" not in vault) or ("s6_status_lut_a" not in vault)
 
-    if not need_s1 and not need_s2 and not need_s3 and not need_s4:
-        print(f"[VAULT OK] Steps 1, 2, 3 & 4 are all locked in '{output_path}'!", flush=True)
+    if not (need_s1 or need_s2 or need_s3 or need_s4 or need_s5 or need_s6):
+        print(f"[VAULT OK] Steps 1, 2, 3, 4, 5 & 6 are all locked in '{output_path}'!", flush=True)
         return
 
     ram_arena = verify_hardware_and_lock_ram()
@@ -802,11 +1077,19 @@ def run_vault_trainer(output_path="model_weights.npz", force_s1=False, force_s2=
         train_step4_into_vault(vault, device)
     else:
         print("[VAULT PROTECTED] Step 4 weights untouched!", flush=True)
+    if need_s5:
+        train_step5_into_vault(vault, device)
+    else:
+        print("[VAULT PROTECTED] Step 5 weights untouched!", flush=True)
+    if need_s6:
+        train_step6_into_vault(vault, device)
+    else:
+        print("[VAULT PROTECTED] Step 6 weights untouched!", flush=True)
 
     np.savez(output_path, **vault)
     del ram_arena
     size_kb = os.path.getsize(output_path) / 1024.0 if os.path.exists(output_path) else 0.0
-    print(f"[EXPORT COMPLETE] Saved Step 1+2+3+4 vault to '{output_path}' ({size_kb:.2f} KB)", flush=True)
+    print(f"[EXPORT COMPLETE] Saved Step 1+2+3+4+5+6 vault to '{output_path}' ({size_kb:.2f} KB)", flush=True)
 
 
 if __name__ == "__main__":
@@ -818,4 +1101,6 @@ if __name__ == "__main__":
         force_s2=("--step2" in args) or ("--force-step2" in args) or do_all,
         force_s3=("--step3" in args) or ("--force-step3" in args) or do_all,
         force_s4=("--step4" in args) or ("--force-step4" in args) or do_all,
+        force_s5=("--step5" in args) or ("--force-step5" in args) or do_all,
+        force_s6=("--step6" in args) or ("--force-step6" in args) or do_all,
     )

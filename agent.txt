@@ -159,3 +159,14 @@ files.download(drive_weights)
 
 
 python offline_train.py --step1
+
+# 1. Regenerate separated greetings.txt, negatives.txt, ages.txt, countries.txt & new hru.txt:
+!python build_greetings_txt.py
+!python build_age_country_txt.py
+!python build_hru_txt.py
+!python build_gender_txt.py
+# 2. Retrain Step 1 (pure greetings) & Step 3 (hru) while keeping Step 2 intact (or --all for all 3):
+!python offline_train.py --all
+
+!python build_wyd_txt.py
+!python offline_train.py --step5

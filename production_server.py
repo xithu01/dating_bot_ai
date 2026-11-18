@@ -29,6 +29,8 @@ S2_DIM = 32
 S2_CLASSES = 6
 S3_CLASSES = 2
 S4_CLASSES = 7
+S5_CLASSES = 2
+S6_CLASSES = 4
 MAX_USERS = 50000
 NUM_WORKERS = 8
 
@@ -46,10 +48,17 @@ class QuantizedModel:
         "pos_f32", "mask_f32", "char_lut", "reject_lut", "poly_mat", "w_poly_mat",
         "inv_sqrt_d", "eps", "m5_0", "m5_1", "m5_2", "m5_3", "mask_b", "mask5", "off5",
         "m3_0", "m3_1", "mask3", "off3", "bloom_mask", "s2_v_mask", "one_i32", "space_i32", "conf_thresh",
+        "s5_emb_f32", "s5_w1_f32", "s5_w2_f32", "s5_wyd_bloom_q",
+      
+        "s6_emb_f32", "s6_w1_f32", "s6_w2_f32",
+        "s6_status_bloom_q", "status_lut_a", "status_lut_b",
     )
 
     def __init__(self, npz_path):
-        req_keys = ("w_intent_q", "s2_country_lut_a", "s3_w2_q", "s4_w2_q", "s4_gender_lut_a")
+        req_keys = (
+            "w_intent_q", "s2_country_lut_a", "s3_w2_q", "s4_w2_q",
+            "s4_gender_lut_a", "s5_w2_q", "s6_w2_q", "s6_status_lut_a",
+        )
         need_train = not os.path.exists(npz_path)
         if not need_train:
             arc = np.load(npz_path, mmap_mode="r")
@@ -90,7 +99,12 @@ class QuantizedModel:
         self.s4_emb_f32 = lock_f32("s4_emb", True)
         self.s4_w1_f32 = lock_f32("s4_w1")
         self.s4_w2_f32 = lock_f32("s4_w2")
-
+        self.s5_emb_f32 = lock_f32("s5_emb", True)
+        self.s5_w1_f32 = lock_f32("s5_w1")
+        self.s5_w2_f32 = lock_f32("s5_w2")
+        self.s6_emb_f32 = lock_f32("s6_emb", True)
+        self.s6_w1_f32 = lock_f32("s6_w1")
+        self.s6_w2_f32 = lock_f32("s6_w2")
         fb_q = np.array(arc["s2_frame_bloom_q"], dtype=np.int8, copy=True)
         for k_attr, k_arc, dt in (
             ("s3_hru_bloom_q", "s3_hru_bloom_q", np.int8),
@@ -99,6 +113,10 @@ class QuantizedModel:
             ("country_lut_b", "s2_country_lut_b", np.uint8),
             ("gender_lut_a", "s4_gender_lut_a", np.uint8),
             ("gender_lut_b", "s4_gender_lut_b", np.uint8),
+            ("s5_wyd_bloom_q", "s5_wyd_bloom_q", np.int8),
+            ("s6_status_bloom_q", "s6_status_bloom_q", np.int8),
+            ("status_lut_a", "s6_status_lut_a", np.uint8),
+            ("status_lut_b", "s6_status_lut_b", np.uint8),
         ):
             arr = arc[k_arc].astype(dt, copy=False)
             arr.flags.writeable = False
@@ -165,6 +183,7 @@ class InferenceSlot:
         "m_a", "m_b", "valid_mask", "valid_f32", "active_count",
         "x", "qkv", "q", "k", "v", "scores", "row_max", "row_sum",
         "attn_out", "proj_out", "norm_tmp", "ffn_mid", "pooled", "intent_logits",
+        "st_hits_a", "st_hits_b", "s6_logits",
     )
 
     def __init__(self, slot_id):
@@ -189,6 +208,9 @@ class InferenceSlot:
         self.s2_logits = np.zeros((1, S2_CLASSES), dtype=np.float32)
         self.s3_logits = np.zeros((1, S3_CLASSES), dtype=np.float32)
         self.s4_logits = np.zeros((1, S4_CLASSES), dtype=np.float32)
+        self.st_hits_a = np.zeros((6,), dtype=np.uint8)
+        self.st_hits_b = np.zeros((6,), dtype=np.uint8)
+        self.s6_logits = np.zeros((1, S6_CLASSES), dtype=np.float32)
         self.tokens = np.zeros((SEQ_LEN,), dtype=np.int32)
         self.tok_bloom, self.tok5, self.tok3 = self.tokens[0:8], self.tokens[8:24], self.tokens[24:32]
         self.t_tmp16, self.t_tmp8 = np.zeros((16,), dtype=np.int32), np.zeros((8,), dtype=np.int32)
@@ -335,7 +357,16 @@ def forward_pass(model, slot, mv_payload):
     slot.s2_tokens[6] = ((slot.s2_tokens[lead_idx] * np.int32(37)) & model.s2_v_mask) + model.one_i32
     slot.s2_tokens[7] = ((slot.s2_tokens[n_words - 1] * np.int32(73)) & model.s2_v_mask) + model.one_i32
 
-    if age_val == 0 and not all_pure_greet:
+    np.take(model.status_lut_a, slot.w_b_idx[:, 0], out=slot.st_hits_a)
+    np.take(model.status_lut_b, slot.w_b_idx[:, 1], out=slot.st_hits_b)
+    st_match = (slot.st_hits_a[:n_words] > 0) & (slot.st_hits_a[:n_words] == slot.st_hits_b[:n_words])
+    st_codes = slot.st_hits_a[:n_words] * st_match
+    n_st_pos = int(np.sum(st_codes == 1))
+    n_st_neg = int(np.sum(st_codes == 2))
+    has_st_ab = bool(np.any(st_codes == 3))
+
+    starts_w_non_wbu = int(kept[0]) == 119 and (k_len < 2 or int(kept[1]) != 98)
+    if age_val == 0 and not all_pure_greet and n_st_pos == 0 and n_st_neg == 0 and not starts_w_non_wbu:
         np.take(model.s3_hru_bloom_q, slot.w_b_idx, out=slot.w_b_hits)
         if bool(np.all(slot.w_b_hits[:n_words])):
             np.take(model.s3_emb_f32, slot.s2_tokens, axis=0, out=slot.s2_emb_buf)
@@ -361,6 +392,7 @@ def forward_pass(model, slot, mv_payload):
     n_female = int(np.sum(g_codes == 2))
     has_neutral = bool(np.any(g_codes == 3))
     has_q_frame = bool(np.any(g_codes == 4))
+    has_s_frame = bool(np.any(g_codes == 5))
 
     np.take(model.s2_frame_bloom_q, slot.w_b_idx, out=slot.w_b_hits)
     all_s2_valid = bool(np.all(slot.w_b_hits[:n_words]))
@@ -376,7 +408,12 @@ def forward_pass(model, slot, mv_payload):
 
     if age_val == 0 and country_id == 0 and (n_male > 0 or n_female > 0 or has_neutral):
         np.take(model.s4_gender_bloom_q, slot.w_b_idx, out=slot.w_b_hits)
-        if bool(np.all(slot.w_b_hits[:n_words])) and not (first_is_pure_greet and n_words == 2 and not has_q and n_female == 0 and not has_neutral):
+        is_hey_man = (
+            first_is_pure_greet and n_words == 2 and not has_q
+            and int(slot.words_mat[1, 15]) == 3 and int(slot.words_mat[1, 0]) == 109
+            and int(slot.words_mat[1, 1]) == 97 and int(slot.words_mat[1, 2]) == 110
+        )
+        if bool(np.all(slot.w_b_hits[:n_words])) and not is_hey_man:
             slot.s4_tokens[:6] = slot.s2_tokens[:6]
             slot.s4_tokens[6] = np.int32(1023) if has_q else (np.int32(1022) if has_s else model.one_i32)
             q_off = np.int32(509) if has_q else (np.int32(251) if has_s else np.int32(0))
@@ -388,13 +425,13 @@ def forward_pass(model, slot, mv_payload):
             np.matmul(slot.s2_pooled, model.s4_w1_f32, out=slot.s2_mid)
             np.maximum(slot.s2_mid, np.float32(0.0), out=slot.s2_mid)
             np.matmul(slot.s2_mid, model.s4_w2_f32, out=slot.s4_logits)
-            if (n_male > 0 and n_female > 0) or has_neutral or has_s or (n_male + n_female >= 2):
+            if (n_male > 0 and n_female > 0) or has_s or (n_male + n_female >= 2) or (has_neutral and n_male == 0 and n_female == 0):
                 return 9, 0, 0
             if n_female > 0:
-                return (10, 0, 2) if (has_q or has_q_frame or float(slot.s4_logits[0, 2]) > float(slot.s4_logits[0, 4])) else (12, 0, 2)
+                return (10, 0, 2) if (not has_s_frame and (has_q or has_q_frame or has_neutral or float(slot.s4_logits[0, 2]) > float(slot.s4_logits[0, 4]))) else (12, 0, 2)
             if n_male > 0:
-                return (11, 0, 1) if (has_q or has_q_frame or float(slot.s4_logits[0, 3]) > float(slot.s4_logits[0, 5])) else (13, 0, 1)
-
+                return (11, 0, 1) if (not has_s_frame and (has_q or has_q_frame or has_neutral or float(slot.s4_logits[0, 3]) > float(slot.s4_logits[0, 5]))) else (13, 0, 1)
+            
     if n_words <= 4 and k_len <= MAX_GREETING_LEN:
         if all_pure_greet:
             return 1, 0, 0
@@ -478,9 +515,50 @@ def forward_pass(model, slot, mv_payload):
             if np.float32(slot.intent_logits[0, 1] - slot.intent_logits[0, 0]) >= model.conf_thresh:
                 return 1, 0, 0
 
-    if not all_s2_valid:
-        return 0, 0, 0
 
+   
+
+
+    if age_val == 0 and country_id == 0 and n_st_pos == 0 and n_st_neg == 0:
+        np.take(model.s5_wyd_bloom_q, slot.w_b_idx, out=slot.w_b_hits)
+        if bool(np.all(slot.w_b_hits[:n_words])):
+            np.take(model.s5_emb_f32, slot.s2_tokens, axis=0, out=slot.s2_emb_buf)
+            slot.s2_emb_buf[6] *= np.float32(2.5)
+            np.sum(slot.s2_emb_buf, axis=0, keepdims=True, out=slot.s2_pooled)
+            slot.s2_pooled *= np.float32(1.0 / (float(n_words) + 3.5))
+            np.matmul(slot.s2_pooled, model.s5_w1_f32, out=slot.s2_mid)
+            np.maximum(slot.s2_mid, np.float32(0.0), out=slot.s2_mid)
+            np.matmul(slot.s2_mid, model.s5_w2_f32, out=slot.s3_logits)
+            if float(slot.s3_logits[0, 1] - slot.s3_logits[0, 0]) >= 0.8:
+                return 15, 0, 0
+
+    is_nmu = n_words == 1 and L0 == 3 and int(kept[0]) == 110 and int(kept[1]) == 109 and int(kept[2]) == 117
+    if age_val == 0 and country_id == 0 and (n_st_pos > 0 or n_st_neg > 0 or is_nmu):
+        np.take(model.s6_status_bloom_q, slot.w_b_idx, out=slot.w_b_hits)
+        if bool(np.all(slot.w_b_hits[:n_words])):
+            slot.s4_tokens[:6] = slot.s2_tokens[:6]
+            slot.s4_tokens[6] = np.int32(1023) if has_q else model.one_i32
+            q_off = np.int32(509) if has_q else np.int32(0)
+            slot.s4_tokens[7] = (((slot.s2_tokens[0] * np.int32(37)) + (slot.s2_tokens[n_words - 1] * np.int32(73)) + q_off) & model.s2_v_mask) + model.one_i32
+            np.take(model.s6_emb_f32, slot.s4_tokens, axis=0, out=slot.s2_emb_buf)
+            slot.s2_emb_buf[6] *= np.float32(2.5)
+            np.sum(slot.s2_emb_buf, axis=0, keepdims=True, out=slot.s2_pooled)
+            slot.s2_pooled *= np.float32(1.0 / (float(n_words) + 3.5))
+            np.matmul(slot.s2_pooled, model.s6_w1_f32, out=slot.s2_mid)
+            np.maximum(slot.s2_mid, np.float32(0.0), out=slot.s2_mid)
+            np.matmul(slot.s2_mid, model.s6_w2_f32, out=slot.s6_logits)
+            s6_0, s6_pos, s6_neg, s6_ab = (
+                float(slot.s6_logits[0, 0]), float(slot.s6_logits[0, 1]),
+                float(slot.s6_logits[0, 2]), float(slot.s6_logits[0, 3]),
+            )
+            if max(s6_pos, s6_neg, s6_ab) > s6_0 - 0.2:
+                if has_st_ab or is_nmu:
+                    return 18, 0, 0
+                if n_st_neg > 0:
+                    return (16, 0, 0) if (n_st_pos == 0 and s6_pos > s6_neg + 1.0) else (17, 0, 0)
+                return (16, 0, 0) if s6_pos >= s6_neg else (17, 0, 0)
+    if not all_s2_valid:
+           return 0, 0, 0
     np.take(model.s2_emb_f32, slot.s2_tokens, axis=0, out=slot.s2_emb_buf)
     slot.s2_emb_buf[6] *= np.float32(2.5)
     np.sum(slot.s2_emb_buf, axis=0, keepdims=True, out=slot.s2_pooled)
@@ -515,7 +593,9 @@ async def start_server(host="127.0.0.1", port=8080):
     suite = (
         (b"hi", 1), (b"hi hi", 1), (b"hy", 1), (b"hyy", 1), (b"hiiii", 1), (b"hey", 1),
         (b"hey hey", 1), (b"heeyy", 1), (b"hello", 1), (b"helloo", 1), (b"hlo", 1),
-        (b"yo", 1), (b"sup", 1), (b"good morning", 1), (b"whats up", 1), (b"hi there", 1),
+        (b"yo", 1), (b"sup", 1), (b"good morning", 1), (b"whats up", 1),
+        (b"wyd", 15), (b"what are you doing", 15), (b"what u up to", 15),
+        (b"hi there", 1), (b"hey man", 1),
         (b"how are you", 8), (b"how are you?", 8), (b"how are you!", 8), (b"hru", 8), (b"hru!", 8),
         (b"hyd", 8), (b"how r u", 8), (b"how u doing!", 8), (b"how was your day", 8),
         (b"hor", 8), (b"how ar you dopin", 8), (b"how u doin", 8), (b"hw r u", 8), (b"how whas you da", 8),
@@ -525,14 +605,14 @@ async def start_server(host="127.0.0.1", port=8080):
         (b"from?", 4), (b"where r u from", 4), (b"tuinsi", 5), (b"handi", 5), (b"ind", 5),
         (b"hi l'm 30 from tun", 6), (b"15", 7), (b"next", 99),
         (b"m or f", 9), (b"m or f?", 9), (b"m/f", 9), (b"f/m", 9), (b"gender?", 9), (b"what gender are you", 9),
-        (b"f?", 10), (b"girl?", 10), (b"are you a girl", 10), (b"r u female", 10), (b"you a girl?", 10),
-        (b"m?", 11), (b"boy?", 11), (b"are you a boy", 11), (b"r u male", 11),
-        (b"f", 12), (b"famle", 12), (b"f here", 12), (b"im a girl", 12),
-        (b"m", 13), (b"male", 13), (b"m here", 13), (b"im a boy", 13),
+        (b"f?", 10), (b"girl?", 10), (b"are you a girl", 10), (b"r u female", 10), (b"is your gender female", 10),
+        (b"m?", 11), (b"boy?", 11), (b"are you a boy", 11), (b"r u male", 11), (b"is your gender male", 11),
+        (b"f", 12), (b"famle", 12), (b"f here", 12), (b"im a girl", 12), (b"hi f", 12),
+        (b"m", 13), (b"male", 13), (b"m here", 13), (b"im a boy", 13), (b"hi m", 13),
         (b"22f", 14), (b"24 m", 14), (b"19 famle", 14), (b"21 girl", 14),
         (b"what", 0), (b"what?", 0), (b"what!", 0), (b"why", 0), (b"why?", 0), (b"why!", 0),
         (b"who", 0), (b"who?", 0), (b"who!", 0), (b"who are you", 0), (b"what is this", 0),
-        (b"why not", 0), (b"lol", 0), (b"hyw", 0), (b"iphey", 0),
+        (b"why not", 0), (b"lol", 0), (b"hyw", 0), (b"iphey", 0), (b"m bi", 0),
     )
     passed = sum(1 for txt, exp in suite if forward_pass(model, test_slot, memoryview(txt))[0] == exp)
     slot_queue.put_nowait(test_slot)
