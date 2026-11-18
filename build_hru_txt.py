@@ -1,6 +1,5 @@
 # FILE: build_hru_txt.py
-# PURPOSE: Build clean hru.txt (Class 8: ask_how_are_you) with slang, punctuation & keyboard typos
-# PYARMOR COMPATIBLE: < 200 lines, < 8.5 KB
+# PURPOSE: Build 100% pure hru.txt (Class 8: ask_how_are_you) with zero gender leaks
 
 import json
 import logging
@@ -16,7 +15,7 @@ logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
 CLEAN_HRU_CHARS_RE = re.compile(r"^[a-z\s'!?.,]+$")
 SPACE_RE = re.compile(r"\s+")
 
-# Strictly matches genuine "how are you" / status questions while blocking "what", "why", "who", "how old"
+# Strictly matches genuine "how are you" / status questions while blocking "what", "why", "who", "how old", and gender words
 STRICT_HRU_RE = re.compile(
     r"^(?:(?:hi+|he+y+|he+l+o+|hlo+|yo+|sup+)\s+)?"
     r"(?:"
@@ -33,11 +32,14 @@ STRICT_HRU_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Words that must NEVER appear in hru.txt (prevents overlap with Class 0, Age Class 2, or Country Class 4)
+# Blocks all gender words, age/country words, and question traps from hru.txt
 HRU_FORBIDDEN_WORDS = frozenset((
+    "m", "f", "w", "male", "female", "famle", "famel", "femael", "femle", "maale", "mael",
+    "girl", "gril", "gurl", "boy", "boi", "man", "woman", "womman", "guy", "lady", "dude",
+    "bro", "gender", "sex", "feminine", "masculine",
     "old", "age", "from", "country", "live", "where", "what", "whats", "what's",
     "why", "who", "much", "far", "tall", "many", "long", "price", "cost", "name",
-    "lol", "haha", "m", "f", "male", "female", "tun", "tunisia", "usa", "uk", "india",
+    "lol", "haha", "tun", "tunisia", "usa", "uk", "india",
 ))
 
 BASE_HRU_PHRASES = (
@@ -52,7 +54,7 @@ BASE_HRU_PHRASES = (
     "how u doing", "how u doin", "how r u doing", "how r u doin",
     "how are u doing", "how are u doin", "hows ur day", "how's ur day",
     "how is ur day", "how was ur day", "how have u been", "how u been",
-     "u good", "are u good", "are you good", "u ok", "are u ok", "are you okay",
+    "wbu", "hbu", "u good", "are u good", "are you good", "u ok", "are u ok", "are you okay",
     # Realistic Keyboard Typos
     "hor", "how ar you dopin", "how ar you doing", "how ar u doin", "how ar u",
     "hw r u", "hw are u", "hw are you", "how u diong", "how are you diong",
@@ -65,8 +67,9 @@ GREETING_PREFIXES = (
     "", "hi", "hey", "hello", "yo", "sup", "hii", "heyy", "helloo", "hiya", "howdy",
 )
 
+# Zero gender words in HRU_TARGETS ("bro", "man", "guy" removed)
 HRU_TARGETS = (
-    "", "today", "rn", "there", "bro", "friend", "stranger", "cutie",
+    "", "today", "rn", "there", "friend", "stranger", "cutie",
 )
 
 PUNCTUATION_ENDINGS = ("", "?", "!", "?!", "!!", ".")
@@ -135,7 +138,6 @@ def build_hru_file(output_path="hru.txt"):
     hru_set = set()
     pull_hf_and_jsonl_hru(hru_set)
 
-    # 1. Standalone status / hru phrases + punctuation (!, ?, ?!, !!, .)
     for phrase in BASE_HRU_PHRASES:
         for end in PUNCTUATION_ENDINGS:
             c = is_valid_hru_line(f"{phrase}{end}")
@@ -148,7 +150,6 @@ def build_hru_file(output_path="hru.txt"):
                     if c:
                         hru_set.add(c)
 
-    # 2. Combined Greeting + Status Question (e.g. "hi how r u", "hey hru", "hello how are you doing!")
     for pfx in GREETING_PREFIXES:
         if not pfx:
             continue
@@ -166,7 +167,7 @@ def build_hru_file(output_path="hru.txt"):
         for line in sorted_hru:
             fh.write(line + "\n")
 
-    print(f"[CLEAN HRU] Overwrote {len(sorted_hru)} pure ask_how_are_you lines to '{output_path}'", flush=True)
+    print(f"[CLEAN HRU] Overwrote {len(sorted_hru)} pure ask_how_are_you lines to '{output_path}' (0 gender leaks)", flush=True)
 
 
 if __name__ == "__main__":

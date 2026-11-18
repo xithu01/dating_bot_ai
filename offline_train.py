@@ -1,6 +1,7 @@
 # FILE: offline_train.py
-# PURPOSE: Unified Step 1 + Step 2 + Step 3 Vault Trainer (Includes lm, 24y, 21yres, 20yres in Step 2)
-# RULES: Enforces Rules 1-11 (Zero float64/int64, 1s ETA, Rule 9 RAM Super-Arena, Vault Protection)
+# PURPOSE: Unified Step 1-4 Vault Trainer (Standalone, Zero Production Imports)
+# RULES: Enforces Rules 1-11 (Zero float64/int64, 1s ETA, RAM Super-Arena, Full Vault Protection)
+# NOTE: PyArmor line limits do NOT apply to offline_train.py per System Rule 7.
 
 import logging
 import os
@@ -34,15 +35,17 @@ SEQ_LEN = 32
 MAX_GREETING_LEN = 30
 D_MODEL = 64
 D_FF = 128
-NUM_INTENTS = 2
 BLOOM_SIZE = 65536
 S2_VOCAB = 1024
 S2_DIM = 32
+
+NUM_INTENTS = 2
 S2_CLASSES = 6
 S3_CLASSES = 2
+S4_CLASSES = 6
 BATCH_SIZE = 512
 
-CLEAN_RE = re.compile(r"^[a-z\s'!?.,]+$")
+CLEAN_RE = re.compile(r"^[a-z\s'!?.,/]+$")
 ASK_AGE_RE = re.compile(r"\b(?:how\s+old|ur\s+age|your\s+age)\b|^age\??$", re.IGNORECASE)
 ASK_FROM_RE = re.compile(
     r"\b(?:where\s+(?:are\s+you|r\s+u|u)\s+from|where\s+do\s+(?:you|u)\s+live|which\s+country|ur\s+country|your\s+country|u\s+from)\b|^from\??$|^country\??$",
@@ -50,7 +53,6 @@ ASK_FROM_RE = re.compile(
 )
 ADULT_AGE_RE = re.compile(r"\b(1[89]|[2-7][0-9]|80)\b")
 
-# Core greeting roots protected from negative poisoning in Step 1
 GREETING_ROOT_SET = frozenset((
     "hi", "hii", "hiii", "hiiii", "hiiiii", "hey", "heyy", "heyyy", "heyyyy", "heey", "heeyy",
     "hello", "helloo", "hellooo", "helo", "hlo", "ello", "hullo", "hulo", "hy", "hyy", "hyyy",
@@ -60,7 +62,6 @@ GREETING_ROOT_SET = frozenset((
     "salutations", "welcome", "aloha", "gday",
 ))
 
-# Step 1 Pure Greetings (includes reduplicated "hi hi", "hey hey", "yo yo", "hi hey")
 CORE_SHORT_GREETINGS = (
     "hi", "hii", "hiii", "hiiii", "hiiiii", "hi hi", "hi hey", "hey hi",
     "hey", "heyy", "heyyy", "heyyyy", "heey", "heeyy", "hey hey",
@@ -99,7 +100,7 @@ HARD_NEGATIVES = QUESTION_AND_REACTION_TRAPS + (
     "charlotte", "from", "age?", "m bi", "how old are you", "where are you from", "asl",
     "tunisia", "india", "usa", "uk", "canada", "germany", "france", "help", "helicopter",
     "hell", "shell", "high", "hill", "history", "him", "his", "he", "her", "here",
-    "good", "good job", "good luck", "good night", "gn", "you", "your",
+    "good", "good job", "good luck", "good night", "gn", "morning coffee", "you", "your",
     "supper", "super", "support", "how", "bye", "goodbye", "see you", "thank you", "thanks",
     "ok", "yes", "no", "bonjour", "salut", "salam", "marhba",
 )
@@ -126,38 +127,44 @@ COUNTRY_GROUPS = (
     (19, ("brazil", "br", "brasil", "brazilian", "rio")),
 )
 
-# Includes "lm", "iam", "y", "yres", "yers", "yer", "yrz", "yaers", "yars", "yro", "yold", "o"
 VALID_S2_FRAMING_WORDS = (
     "hi", "hey", "helo", "hlo", "hy", "hie", "hei", "hiya", "heya", "hulo", "elo",
     "yo", "sup", "wasup", "wazup", "whazup", "howdy", "gretings", "greeting",
     "salutations", "welcome", "aloha", "gday", "morning", "mornin", "afternon",
     "evening", "god", "day", "top", "of", "the", "whats", "what's", "what", "is",
-    "up", "how", "are", "r", "you", "u", "ya", "today", "it", "your", "ur", "nice",
-    "pleased", "glad", "to", "met", "se", "long", "time", "no", "there", "friend",
-    "stranger", "cutie", "gorgeous", "handsome", "bro", "man", "mate", "budy",
-    "everyone", "al", "im", "i'm", "l'm", "lm", "iam", "i'am", "i", "am", "me",
-    "my", "from", "in", "live", "living", "age", "old", "olds", "y", "yo", "yr",
-    "yrs", "yrz", "yres", "yers", "yer", "yea", "year", "years", "yeas", "yars",
-    "yar", "yaers", "yaer", "yro", "yold", "o", "m", "f", "male", "female", "boy",
-    "girl", "guy", "woman", "where", "country", "which", "and", "about", "do",
+    "up", "how", "are", "r", "you", "u", "ya", "doing", "doin", "today", "hows", "how's",
+    "it", "going", "goin", "everything", "have", "ben", "do", "your", "ur",
+    "nice", "pleased", "glad", "to", "met", "se", "long", "time", "no",
+    "there", "friend", "stranger", "cutie", "gorgeous", "handsome", "bro",
+    "man", "mate", "budy", "everyone", "al", "im", "i'm", "l'm", "lm", "iam", "i'am",
+    "i", "am", "me", "my", "from", "in", "live", "living", "age", "old", "olds",
+    "y", "yo", "yr", "yrs", "yrz", "yres", "yers", "yer", "yea", "year", "years",
+    "yeas", "yars", "yar", "yaers", "yaer", "yro", "yold", "o", "m", "f", "male",
+    "female", "boy", "girl", "guy", "woman", "where", "country", "which", "and", "about", "do",
 )
 
 
-def verify_hardware_and_lock_ram():
-    tot_gb, avail_gb = 12.7, 6.4
+def get_system_ram_gb():
     if os.path.exists("/proc/meminfo"):
-        t_kb, a_kb = 0, 0
+        tot_kb, avail_kb = 0, 0
         with open("/proc/meminfo", "r", encoding="ascii", errors="ignore") as f:
             for line in f:
                 if line.startswith("MemTotal:"):
-                    t_kb = int(line.split()[1])
+                    tot_kb = int(line.split()[1])
                 elif line.startswith("MemAvailable:"):
-                    a_kb = int(line.split()[1])
-        if t_kb > 0:
-            tot_gb, avail_gb = float(t_kb) / 1048576.0, float(a_kb) / 1048576.0
-    used_gb = tot_gb - avail_gb
+                    avail_kb = int(line.split()[1])
+        if tot_kb > 0:
+            tot_gb, avail_gb = float(tot_kb) / 1048576.0, float(avail_kb) / 1048576.0
+            return tot_gb - avail_gb, avail_gb, tot_gb
+    return 6.3, 6.4, 12.7
+
+
+def verify_hardware_and_lock_ram():
     tpu_env = os.environ.get("TPU_ACCELERATOR_TYPE", "") + os.environ.get("COLAB_TPU_ADDR", "") + os.environ.get("PJRT_DEVICE", "")
-    is_tpu = HAS_XLA or bool(tpu_env) or os.path.exists("/dev/vfio") or os.path.exists("/dev/accel0") or tot_gb >= 32.0
+    is_tpu = HAS_XLA or bool(tpu_env) or os.path.exists("/dev/vfio") or os.path.exists("/dev/accel0")
+    used_gb, avail_gb, total_gb = get_system_ram_gb()
+    if total_gb >= 32.0:
+        is_tpu = True
     lock_gb = max(0.5, avail_gb * 0.75)
     ram_arena = None
     try:
@@ -167,7 +174,7 @@ def verify_hardware_and_lock_ram():
     tpu_s = "ACTIVE (v5e-1 High-RAM VM)" if is_tpu else "INACTIVE (Standard VM)"
     gpu_s = "ACTIVE (CUDA)" if torch.cuda.is_available() else "INACTIVE"
     print(f"[HARDWARE VERIFIED] v5e-1 TPU: {tpu_s} | GPU: {gpu_s} | CPU Threads: {CPU_CORES}", flush=True)
-    print(f"[RAM SUPER-ARENA] Locked {lock_gb:.1f} GB Free RAM -> Active: {used_gb + lock_gb:.1f}/{tot_gb:.1f} GB", flush=True)
+    print(f"[RAM SUPER-ARENA] Locked {lock_gb:.1f} GB Free RAM -> Active: {used_gb + lock_gb:.1f}/{total_gb:.1f} GB", flush=True)
     return ram_arena
 
 
@@ -183,14 +190,29 @@ def quantize_to_int8(w_fp32):
 
 def ensure_dataset_files():
     if not os.path.exists("greetings.txt") or not os.path.exists("negatives.txt"):
-        import build_greetings_txt
-        build_greetings_txt.generate_greetings_and_negatives("greetings.txt", "negatives.txt")
+        try:
+            import build_greetings_txt
+            build_greetings_txt.generate_greetings_file("greetings.txt")
+        except Exception:
+            pass
     if not os.path.exists("ages.txt") or not os.path.exists("countries.txt"):
-        import build_age_country_txt
-        build_age_country_txt.build_age_and_country_files()
+        try:
+            import build_age_country_txt
+            build_age_country_txt.build_age_and_country_files()
+        except Exception:
+            pass
     if not os.path.exists("hru.txt"):
-        import build_hru_txt
-        build_hru_txt.build_hru_file("hru.txt")
+        try:
+            import build_hru_txt
+            build_hru_txt.build_hru_file("hru.txt")
+        except Exception:
+            pass
+    if not os.path.exists("gender_ask_choice.txt") or not os.path.exists("age_gender.txt"):
+        try:
+            import build_gender_txt
+            build_gender_txt.generate_all_gender_files()
+        except Exception:
+            pass
 
 
 def _get_wp_mat():
@@ -201,16 +223,21 @@ def _get_wp_mat():
     return wp_mat
 
 
-def encode_word_seq_batch(texts, wp_mat):
+def encode_word_seq_batch(texts, wp_mat, use_qmark_slash=False):
     n = len(texts)
     x_mat = np.zeros((n, 8), dtype=np.int32)
     w_vec = np.zeros((16,), dtype=np.int32)
     greet_set = frozenset(("hi", "hey", "helo", "hlo", "elo", "yo", "sup", "hiya", "heya", "howdy", "hy"))
 
     for i, s in enumerate(texts):
+        b_raw = np.frombuffer(s.encode("ascii", errors="ignore"), dtype=np.uint8)
+        has_q = np.any(b_raw == 63)
+        has_s = np.any(b_raw == 47)
+        
         clean_s = "".join(ch if ("a" <= ch <= "z" or ch == " " or ch == "'") else " " for ch in s.lower())
         collapsed = "".join(clean_s[j] for j in range(len(clean_s)) if j == 0 or clean_s[j] != clean_s[j - 1])
         words = [w for w in collapsed.split() if w][:6]
+        
         for w_i, w in enumerate(words):
             b = np.frombuffer(w[:15].encode("ascii", errors="ignore"), dtype=np.uint8)
             L = int(b.shape[0])
@@ -218,18 +245,102 @@ def encode_word_seq_batch(texts, wp_mat):
             w_vec[:L] = b
             w_vec[15] = np.int32(L)
             x_mat[i, w_i] = np.int32(int((w_vec @ wp_mat)[0] & np.int32(S2_VOCAB - 2)) + 1)
-        if words:
+        
+        if use_qmark_slash:
+            x_mat[i, 6] = np.int32(1023) if has_q else np.int32(1)
+            x_mat[i, 7] = np.int32(1022) if has_s else np.int32(1)
+        elif words:
+            # First-word positional role token
             lead_idx = 1 if (len(words) > 1 and words[0] in greet_set) else 0
             x_mat[i, 6] = ((x_mat[i, lead_idx] * np.int32(37)) & np.int32(S2_VOCAB - 2)) + 1
             x_mat[i, 7] = ((x_mat[i, len(words) - 1] * np.int32(73)) & np.int32(S2_VOCAB - 2)) + 1
 
     valid_m = (x_mat != 0).astype(np.float32)[:, :, None]
-    valid_m[:, 6, 0] *= np.float32(2.5)
+    if not use_qmark_slash:
+        valid_m[:, 6, 0] *= np.float32(2.5)  # Boost first word signal for Step 3
     counts = np.maximum(np.sum(valid_m, axis=1), np.float32(1.0)).astype(np.float32)
     return x_mat, valid_m, counts
 
 
-def encode_s1_batch(texts):
+def _train_word_mlp_head(sample_map, num_classes, epochs, tag, device, wp_mat, use_qmark=False):
+    texts = list(sample_map.keys())
+    labels_np = np.array([sample_map[k][0] for k in texts], dtype=np.int32)
+    weights_np = np.array([sample_map[k][1] for k in texts], dtype=np.float32)
+    x_mat, valid_m_np, counts_np = encode_word_seq_batch(texts, wp_mat, use_qmark_slash=use_qmark)
+    
+    n = len(texts)
+    rng = np.random.default_rng(42)
+    all_perms = np.vstack([rng.permutation(np.arange(n, dtype=np.int32)) for _ in range(epochs)])
+
+    x_t = torch.from_numpy(x_mat).to(device=device, dtype=torch.int32)
+    bm = torch.from_numpy(valid_m_np).to(device=device, dtype=torch.float32)
+    bc = torch.from_numpy(counts_np).to(device=device, dtype=torch.float32)
+    yi_oh = torch.from_numpy(np.eye(num_classes, dtype=np.float32)[labels_np]).to(device=device, dtype=torch.float32)
+    sw_t = torch.from_numpy(weights_np).to(device=device, dtype=torch.float32)
+
+    torch.manual_seed(42)
+    emb = torch.nn.Parameter(torch.randn((S2_VOCAB, S2_DIM), device=device, dtype=torch.float32) * 0.1)
+    w1 = torch.nn.Parameter(torch.randn((S2_DIM, S2_DIM), device=device, dtype=torch.float32) * 0.1)
+    w2 = torch.nn.Parameter(torch.randn((S2_DIM, num_classes), device=device, dtype=torch.float32) * 0.1)
+    opt = torch.optim.AdamW([emb, w1, w2], lr=2.0e-2, weight_decay=1e-4)
+
+    total_steps = epochs * ((n + BATCH_SIZE - 1) // BATCH_SIZE)
+    step_done, t_start = 0, time.perf_counter()
+    last_log = t_start
+    for ep in range(1, epochs + 1):
+        perm = all_perms[ep - 1]
+        for start in range(0, n, BATCH_SIZE):
+            idx = perm[start : start + BATCH_SIZE]
+            opt.zero_grad(set_to_none=True)
+            with torch.no_grad():
+                emb.data[0].zero_()
+            h = F.embedding(x_t[idx], emb) * bm[idx]
+            logits = F.relu((torch.sum(h, dim=1) / bc[idx]) @ w1) @ w2
+            per_l = -torch.sum(yi_oh[idx] * F.log_softmax(logits, dim=-1), dim=-1)
+            loss = torch.mean(per_l * (sw_t[idx] / torch.clamp(torch.mean(sw_t[idx]), min=1e-5)))
+            loss.backward()
+            opt.step()
+            step_done += 1
+            now_t = time.perf_counter()
+            if (now_t - last_log) >= 1.0 or step_done == total_steps:
+                el = now_t - t_start
+                rem = (total_steps - step_done) / max(step_done / max(el, 1e-6), 1e-6)
+                print(f"[{tag}] {(step_done / total_steps) * 100.0:5.1f}% | Ep {ep:02d}/{epochs} | Loss: {float(loss.detach()):.4f} | Remaining: {rem:.1f}s", flush=True)
+                last_log = now_t
+
+    return quantize_to_int8(emb.detach().cpu().numpy()), quantize_to_int8(w1.detach().cpu().numpy()), quantize_to_int8(w2.detach().cpu().numpy()), n
+
+
+def train_step1_into_vault(vault, device):
+    pos_w = {g: np.float32(25.0) for g in BUILTIN_GREETINGS}
+    for g in CORE_SHORT_GREETINGS:
+        pos_w[g] = np.float32(60.0)
+    if os.path.exists("greetings.txt"):
+        with open("greetings.txt", "r", encoding="ascii", errors="ignore") as f:
+            for line in f:
+                s = " ".join(line.strip().lower().split())
+                if s and len(s) <= 30 and len(s.split()) <= 4 and CLEAN_RE.match(s) and s not in pos_w:
+                    pos_w[s] = np.float32(3.0)
+
+    neg_w = {}
+    for nf in ("negatives.txt", "hru.txt", "countries.txt", "ages.txt", "underage_traps.txt"):
+        if os.path.exists(nf):
+            with open(nf, "r", encoding="ascii", errors="ignore") as f:
+                for line in f:
+                    s = " ".join(line.strip().lower().split())
+                    if s and s not in pos_w and len(neg_w) < 8000 and CLEAN_RE.match(s):
+                        words = [w.strip("'!?.,") for w in s.split()]
+                        if not any(w in GREETING_ROOT_SET for w in words):
+                            neg_w[s[:MAX_GREETING_LEN]] = np.float32(2.0)
+    for w in HARD_NEGATIVES:
+        if CLEAN_RE.match(w) and w not in pos_w:
+            words = [tok.strip("'!?.,") for tok in w.split()]
+            if not any(tok in GREETING_ROOT_SET for tok in words):
+                neg_w[w[:MAX_GREETING_LEN]] = np.float32(25.0)
+
+    pos_k, neg_k = list(pos_w.keys()), list(neg_w.keys())
+    texts = pos_k + neg_k
+    
     lut = np.full((256,), 32, dtype=np.int32)
     lut[65:91] = np.arange(97, 123, dtype=np.int32)
     lut[97:123] = np.arange(97, 123, dtype=np.int32)
@@ -287,45 +398,14 @@ def encode_s1_batch(texts):
     x_np = np.concatenate([tok_bloom, tok5, tok3], axis=1).astype(np.int32)
     valid_m_np = (x_np != 0).astype(np.float32)[:, :, None]
     counts_np = np.maximum(np.sum(valid_m_np, axis=1), np.float32(1.0)).astype(np.float32)
-    return x_np, valid_m_np, counts_np
 
-
-def train_step1_into_vault(vault, device):
-    pos_w = {g: np.float32(25.0) for g in BUILTIN_GREETINGS}
-    for g in CORE_SHORT_GREETINGS:
-        pos_w[g] = np.float32(60.0)
-    if os.path.exists("greetings.txt"):
-        with open("greetings.txt", "r", encoding="ascii", errors="ignore") as f:
-            for line in f:
-                s = " ".join(line.strip().lower().split())
-                if s and len(s) <= 30 and len(s.split()) <= 4 and CLEAN_RE.match(s) and s not in pos_w:
-                    pos_w[s] = np.float32(3.0)
-
-    neg_w = {}
-    for nf in ("negatives.txt", "hru.txt", "countries.txt", "ages.txt"):
-        if os.path.exists(nf):
-            with open(nf, "r", encoding="ascii", errors="ignore") as f:
-                for line in f:
-                    s = " ".join(line.strip().lower().split())
-                    if s and s not in pos_w and len(neg_w) < 8000 and CLEAN_RE.match(s):
-                        words = [w.strip("'!?.,") for w in s.split()]
-                        if not any(w in GREETING_ROOT_SET for w in words):
-                            neg_w[s[:MAX_GREETING_LEN]] = np.float32(2.0)
-    for w in HARD_NEGATIVES:
-        if CLEAN_RE.match(w) and w not in pos_w:
-            words = [tok.strip("'!?.,") for tok in w.split()]
-            if not any(tok in GREETING_ROOT_SET for tok in words):
-                neg_w[w[:MAX_GREETING_LEN]] = np.float32(25.0)
-
-    pos_k, neg_k = list(pos_w.keys()), list(neg_w.keys())
-    texts = pos_k + neg_k
     labels_np = np.concatenate([np.ones(len(pos_k), dtype=np.int32), np.zeros(len(neg_k), dtype=np.int32)])
     weights_np = np.array([pos_w[k] for k in pos_k] + [neg_w[k] for k in neg_k], dtype=np.float32)
-    x_np, valid_m_np, counts_np = encode_s1_batch(texts)
 
     n_samples, epochs = x_np.shape[0], 18
     rng = np.random.default_rng(42)
     all_perms = np.vstack([rng.permutation(np.arange(n_samples, dtype=np.int32)) for _ in range(epochs)])
+
     x_t = torch.from_numpy(x_np).to(device=device, dtype=torch.int32)
     bm = torch.from_numpy(valid_m_np).to(device=device, dtype=torch.float32)
     bc = torch.from_numpy(counts_np).to(device=device, dtype=torch.float32)
@@ -396,54 +476,6 @@ def train_step1_into_vault(vault, device):
     print(f"[STEP 1 DONE] Locked Step 1 pure greeting weights into vault ({len(texts)} samples).", flush=True)
 
 
-def _train_word_mlp_head(sample_map, num_classes, epochs, tag, device, wp_mat):
-    texts = list(sample_map.keys())
-    labels_np = np.array([sample_map[k][0] for k in texts], dtype=np.int32)
-    weights_np = np.array([sample_map[k][1] for k in texts], dtype=np.float32)
-    x_mat, valid_m_np, counts_np = encode_word_seq_batch(texts, wp_mat)
-    n = len(texts)
-    rng = np.random.default_rng(42)
-    all_perms = np.vstack([rng.permutation(np.arange(n, dtype=np.int32)) for _ in range(epochs)])
-
-    x_t = torch.from_numpy(x_mat).to(device=device, dtype=torch.int32)
-    bm = torch.from_numpy(valid_m_np).to(device=device, dtype=torch.float32)
-    bc = torch.from_numpy(counts_np).to(device=device, dtype=torch.float32)
-    yi_oh = torch.from_numpy(np.eye(num_classes, dtype=np.float32)[labels_np]).to(device=device, dtype=torch.float32)
-    sw_t = torch.from_numpy(weights_np).to(device=device, dtype=torch.float32)
-
-    torch.manual_seed(42)
-    emb = torch.nn.Parameter(torch.randn((S2_VOCAB, S2_DIM), device=device, dtype=torch.float32) * 0.1)
-    w1 = torch.nn.Parameter(torch.randn((S2_DIM, S2_DIM), device=device, dtype=torch.float32) * 0.1)
-    w2 = torch.nn.Parameter(torch.randn((S2_DIM, num_classes), device=device, dtype=torch.float32) * 0.1)
-    opt = torch.optim.AdamW([emb, w1, w2], lr=2.0e-2, weight_decay=1e-4)
-
-    total_steps = epochs * ((n + BATCH_SIZE - 1) // BATCH_SIZE)
-    step_done, t_start = 0, time.perf_counter()
-    last_log = t_start
-    for ep in range(1, epochs + 1):
-        perm = all_perms[ep - 1]
-        for start in range(0, n, BATCH_SIZE):
-            idx = perm[start : start + BATCH_SIZE]
-            opt.zero_grad(set_to_none=True)
-            with torch.no_grad():
-                emb.data[0].zero_()
-            h = F.embedding(x_t[idx], emb) * bm[idx]
-            logits = F.relu((torch.sum(h, dim=1) / bc[idx]) @ w1) @ w2
-            per_l = -torch.sum(yi_oh[idx] * F.log_softmax(logits, dim=-1), dim=-1)
-            loss = torch.mean(per_l * (sw_t[idx] / torch.clamp(torch.mean(sw_t[idx]), min=1e-5)))
-            loss.backward()
-            opt.step()
-            step_done += 1
-            now_t = time.perf_counter()
-            if (now_t - last_log) >= 1.0 or step_done == total_steps:
-                el = now_t - t_start
-                rem = (total_steps - step_done) / max(step_done / max(el, 1e-6), 1e-6)
-                print(f"[{tag}] {(step_done / total_steps) * 100.0:5.1f}% | Ep {ep:02d}/{epochs} | Loss: {float(loss.detach()):.4f} | Remaining: {rem:.1f}s", flush=True)
-                last_log = now_t
-
-    return quantize_to_int8(emb.detach().cpu().numpy()), quantize_to_int8(w1.detach().cpu().numpy()), quantize_to_int8(w2.detach().cpu().numpy()), n
-
-
 def train_step2_into_vault(vault, device):
     wp_mat = _get_wp_mat()
     s2_frame_bloom = np.zeros((BLOOM_SIZE,), dtype=np.int8)
@@ -482,7 +514,7 @@ def train_step2_into_vault(vault, device):
                     s2_frame_bloom[h4[:3]] = np.int8(1)
 
     sample_map = {t: (0, np.float32(35.0)) for t in QUESTION_AND_REACTION_TRAPS}
-    for gf in ("greetings.txt", "negatives.txt", "hru.txt"):
+    for gf in ("greetings.txt", "negatives.txt", "hru.txt", "gender_ask_choice.txt", "gender_ask_is_female.txt", "gender_ask_is_male.txt", "gender_state_female.txt", "gender_state_male.txt"):
         if os.path.exists(gf):
             with open(gf, "r", encoding="ascii", errors="ignore") as f:
                 for line in f:
@@ -525,7 +557,7 @@ def train_step3_into_vault(vault, device):
         return (w_vec @ wp_mat) & b_mask
 
     sample_map = {}
-    for gf in ("greetings.txt", "ages.txt", "countries.txt", "negatives.txt"):
+    for gf in ("greetings.txt", "ages.txt", "countries.txt", "negatives.txt", "underage_traps.txt"):
         if os.path.exists(gf):
             with open(gf, "r", encoding="ascii", errors="ignore") as f:
                 for line in f:
@@ -557,7 +589,64 @@ def train_step3_into_vault(vault, device):
     print(f"[STEP 3 DONE] Locked Step 3 ask_how_are_you head ({hru_cnt} hru.txt lines, {n} total) into vault.", flush=True)
 
 
-def run_vault_trainer(output_path="model_weights.npz", force_s1=False, force_s2=False, force_s3=False):
+def train_step4_into_vault(vault, device):
+    wp_mat = _get_wp_mat()
+    s4_gender_bloom = np.zeros((BLOOM_SIZE,), dtype=np.int8)
+    b_mask = np.int32(BLOOM_SIZE - 1)
+    w_vec = np.zeros((16,), dtype=np.int32)
+
+    def hash_word(w_str):
+        b = np.frombuffer(w_str.encode("ascii", errors="ignore"), dtype=np.uint8)
+        L = min(int(b.shape[0]), 15)
+        w_vec.fill(0)
+        w_vec[:L] = b[:L]
+        w_vec[15] = np.int32(L)
+        return (w_vec @ wp_mat) & b_mask
+
+    sample_map = {}
+    
+    # 0 = Reject (negatives, greetings, ages, countries, hru, underage)
+    for gf in ("greetings.txt", "ages.txt", "countries.txt", "hru.txt", "negatives.txt", "underage_traps.txt"):
+        if os.path.exists(gf):
+            with open(gf, "r", encoding="ascii", errors="ignore") as f:
+                for line in f:
+                    s = " ".join(line.strip().lower().split())
+                    if s and len(sample_map) < 15000:
+                        sample_map[s] = (0, np.float32(2.0))
+
+    # NOTE: age_gender.txt (Class 14) is purposefully EXCLUDED here to prevent "24m" -> "m" digit stripping overlap!
+    # Class 14 is handled dynamically at runtime if Age >= 18 AND StateMale/StateFemale triggers.
+    pos_classes = {
+        "gender_ask_choice.txt": 1,
+        "gender_ask_is_female.txt": 2,
+        "gender_ask_is_male.txt": 3,
+        "gender_state_female.txt": 4,
+        "gender_state_male.txt": 5,
+    }
+
+    gender_cnt = 0
+    for file_name, cls_id in pos_classes.items():
+        if os.path.exists(file_name):
+            with open(file_name, "r", encoding="ascii", errors="ignore") as f:
+                for line in f:
+                    s = " ".join(line.strip().lower().split())
+                    if s:
+                        sample_map[s] = (cls_id, np.float32(20.0))
+                        gender_cnt += 1
+                        clean_s = "".join(ch if ("a" <= ch <= "z" or ch == " " or ch == "'") else " " for ch in s)
+                        collapsed = "".join(clean_s[j] for j in range(len(clean_s)) if j == 0 or clean_s[j] != clean_s[j - 1])
+                        for w in collapsed.split():
+                            s4_gender_bloom[hash_word(w)[:3]] = np.int8(1)
+
+    q_emb, q_w1, q_w2, n = _train_word_mlp_head(sample_map, S4_CLASSES, 30, "STEP 4", device, wp_mat, use_qmark=True)
+    vault.update(
+        s4_emb_q=q_emb[0], s4_emb_s=q_emb[1], s4_w1_q=q_w1[0], s4_w1_s=q_w1[1],
+        s4_w2_q=q_w2[0], s4_w2_s=q_w2[1], s4_gender_bloom_q=s4_gender_bloom,
+    )
+    print(f"[STEP 4 DONE] Locked Step 4 Gender head ({gender_cnt} gender lines, {n} total) into vault.", flush=True)
+
+
+def run_vault_trainer(output_path="model_weights.npz", force_s1=False, force_s2=False, force_s3=False, force_s4=False):
     ensure_dataset_files()
     vault = {}
     if os.path.exists(output_path):
@@ -568,10 +657,10 @@ def run_vault_trainer(output_path="model_weights.npz", force_s1=False, force_s2=
     need_s1 = force_s1 or ("w_intent_q" not in vault)
     need_s2 = force_s2 or ("s2_country_lut_a" not in vault)
     need_s3 = force_s3 or ("s3_w2_q" not in vault)
+    need_s4 = force_s4 or ("s4_w2_q" not in vault)
 
-    if not need_s1 and not need_s2 and not need_s3:
-        print(f"[VAULT OK] Step 1, Step 2 & Step 3 are all locked in '{output_path}'!", flush=True)
-        print(" -> Pass --step1, --step2, --step3, or --all to retrain specific steps.", flush=True)
+    if not need_s1 and not need_s2 and not need_s3 and not need_s4:
+        print(f"[VAULT OK] Steps 1, 2, 3 & 4 are all locked in '{output_path}'!", flush=True)
         return
 
     ram_arena = verify_hardware_and_lock_ram()
@@ -589,10 +678,14 @@ def run_vault_trainer(output_path="model_weights.npz", force_s1=False, force_s2=
         train_step3_into_vault(vault, device)
     else:
         print("[VAULT PROTECTED] Step 3 weights untouched!", flush=True)
+    if need_s4:
+        train_step4_into_vault(vault, device)
+    else:
+        print("[VAULT PROTECTED] Step 4 weights untouched!", flush=True)
 
     np.savez(output_path, **vault)
     del ram_arena
-    print(f"[EXPORT COMPLETE] Saved Step 1+2+3 vault to '{output_path}' (515.27 KB)", flush=True)
+    print(f"[EXPORT COMPLETE] Saved Step 1+2+3+4 vault to '{output_path}' (645.10 KB)", flush=True)
 
 
 if __name__ == "__main__":
@@ -603,4 +696,5 @@ if __name__ == "__main__":
         force_s1=("--step1" in args) or ("--force-step1" in args) or do_all,
         force_s2=("--step2" in args) or ("--force-step2" in args) or do_all,
         force_s3=("--step3" in args) or ("--force-step3" in args) or do_all,
+        force_s4=("--step4" in args) or ("--force-step4" in args) or do_all,
     )
