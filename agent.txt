@@ -195,3 +195,18 @@ python offline_train.py --step1
 
 python build_name_txt.py
 python step9_name.py
+
+python build_hobbies_txt.py
+python step10_hobbies.py
+
+python build_private_yesno_txt.py
+python step12_private_yesno.py
+
+python build_pic_photo_txt.py
+python step13_pic_photo.py
+
+python build_bot_check_txt.py
+python step14_bot_check.py
+
+python build_step15_pack_txt.py
+python step15_dating_pack.py

@@ -6,7 +6,7 @@
 import asyncio
 import time
 import numpy as np
-
+from plugin_hub import reset_plugin_user, route_plugin_class
 BLOOM_SIZE = 65536
 SESSION_TIMEOUT_S = 600
 
@@ -459,7 +459,6 @@ def _build_step1_bloom_tables(w_poly_mat, s2_frame_bloom):
     s2_frame_bloom.flags.writeable = False
     return word_bloom, single_bloom, target_bloom, lead_bloom
 
-
 def reset_user_session(users, uid):
     users.last_intent[uid] = np.uint8(0)
     users.msg_count[uid] = np.uint8(0)
@@ -467,6 +466,7 @@ def reset_user_session(users, uid):
     users.country[uid] = np.uint8(0)
     users.gender[uid] = np.uint8(0)
     users.conv_flags[uid] = np.uint8(0)
+    reset_plugin_user(uid)
 
 
 def handle_user_query(model, slot, users, uid, mv_payload, forward_pass_fn):
@@ -604,15 +604,12 @@ def handle_user_query(model, slot, users, uid, mv_payload, forward_pass_fn):
         users.conv_flags[uid] = np.uint8(flags | FLAG_GREETED)
         return CACHED_REACT_ACK_COMPLETE_POOL[rot8] if (prev_age >= 18 and prev_country > 0) else CACHED_REACT_ACK_POOL[rot8]
 
-    if class_id in (21, 22):
-        from step8_looking_for import route_step8
-        return route_step8(class_id, aux_id, users, uid, flags, prev_age, prev_country, bot_g, rot8)
-    if class_id in (23, 24):
-        from step9_name import route_step9
-        return route_step9(class_id, aux_id, users, uid, flags, prev_age, prev_country, bot_g, rot8)
+    if class_id >= 21:
+        res = route_plugin_class(class_id, aux_id, users, uid, flags, prev_age, prev_country, bot_g, rot8)
+        if res is not None:
+            return res
+
     return CACHED_REJECT_RESPONSE
-
-
 async def wal_write_behind_worker(users, wal_path="events_wal.bin"):
     while True:
         await asyncio.sleep(2.0)

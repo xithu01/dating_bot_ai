@@ -11,6 +11,12 @@ import time
 import numpy as np
 from step8_looking_for import forward_step8, get_step8_engine
 from step9_name import forward_step9, get_step9_engine
+from step10_hobbies import forward_step10, get_step10_engine
+from step11_rel_status import forward_step11, get_step11_engine
+from step12_private_yesno import forward_step12, get_step12_engine
+from step13_pic_photo import forward_step13, get_step13_engine
+from step14_bot_check import forward_step14, get_step14_engine
+from plugin_hub import forward_post_s7, forward_pre_s7, init_all_plugins
 from production_server_part2 import (
     _build_step1_bloom_tables,
     handle_user_query,
@@ -170,8 +176,12 @@ class QuantizedModel:
         self.one_i32, self.space_i32, self.conf_thresh = np.int32(1), np.int32(32), np.float32(0.5)
         get_step8_engine(npz_path)
         get_step9_engine(npz_path)
-
-
+        get_step10_engine(npz_path)
+        get_step11_engine(npz_path)
+        get_step12_engine(npz_path)
+        get_step13_engine(npz_path)
+        get_step14_engine(npz_path)
+        init_all_plugins(npz_path)
 class InferenceSlot:
     __slots__ = (
         "slot_id", "raw_u8", "canon_u8", "body_sub", "rej_mask",
@@ -442,7 +452,12 @@ def forward_pass(model, slot, mv_payload):
                 return (10, 0, 2) if (not has_s_frame and (has_q or has_q_frame or has_neutral or float(slot.s4_logits[0, 2]) > float(slot.s4_logits[0, 4]))) else (12, 0, 2)
             if n_male > 0:
                 return (11, 0, 1) if (not has_s_frame and (has_q or has_q_frame or has_neutral or float(slot.s4_logits[0, 3]) > float(slot.s4_logits[0, 5]))) else (13, 0, 1)
-
+    p_cid, p_age, p_aux = forward_pre_s7(model, slot, n_words, has_q, age_val, country_id)
+    if p_cid != 0:
+        return p_cid, p_age, p_aux
+    s14_cid, s14_age, s14_aux = forward_step14(model, slot, n_words, has_q, age_val, country_id)
+    if s14_cid != 0:
+        return s14_cid, s14_age, s14_aux
     if n_words <= 4 and k_len <= MAX_GREETING_LEN:
         if all_pure_greet:
             return 1, 0, 0
@@ -591,9 +606,21 @@ def forward_pass(model, slot, mv_payload):
     s8_cid, s8_age, s8_aux = forward_step8(model, slot, n_words, has_q, age_val, country_id)
     if s8_cid != 0:
         return s8_cid, s8_age, s8_aux
+    s11_cid, s11_age, s11_aux = forward_step11(model, slot, n_words, has_q, age_val, country_id)
+    if s11_cid != 0:
+        return s11_cid, s11_age, s11_aux
     s9_cid, s9_age, s9_aux = forward_step9(model, slot, n_words, has_q, age_val, country_id)
     if s9_cid != 0:
         return s9_cid, s9_age, s9_aux
+    s12_cid, s12_age, s12_aux = forward_step12(model, slot, n_words, has_q, age_val, country_id)
+    if s12_cid != 0:
+        return s12_cid, s12_age, s12_aux
+    s13_cid, s13_age, s13_aux = forward_step13(model, slot, n_words, has_q, age_val, country_id)
+    if s13_cid != 0:
+        return s13_cid, s13_age, s13_aux
+    p_cid, p_age, p_aux = forward_post_s7(model, slot, n_words, has_q, age_val, country_id)
+    if p_cid != 0:
+        return p_cid, p_age, p_aux
     if not all_s2_valid:
         return 0, 0, 0
     np.take(model.s2_emb_f32, slot.s2_tokens, axis=0, out=slot.s2_emb_buf)
@@ -611,6 +638,9 @@ def forward_pass(model, slot, mv_payload):
         return 2, 0, 0
     if s_ask_ctry > s0 + 0.8 and s_ask_ctry > s_ask_age:
         return 4, 0, 0
+    s10_cid, s10_age, s10_aux = forward_step10(model, slot, n_words, has_q, age_val, country_id)
+    if s10_cid != 0:
+        return s10_cid, s10_age, s10_aux
     return 0, 0, 0
 
 
