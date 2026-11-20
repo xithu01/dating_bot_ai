@@ -1,7 +1,6 @@
 # FILE: colab_train.py
-# PURPOSE: All-in-One Google Colab Git Clone/Pull + Vault Restore + Trainer + Drive/Git/PC Export
-# USAGE IN COLAB: Paste this entire file into ONE Colab cell and click Run,
-#                 OR upload it to Colab and run:  %run colab_train.py
+# PURPOSE: Final All-in-One Google Colab Git Sync + Vault Restore + Trainer + Drive/PC/Git Export
+# USAGE:   Run `%run /content/drive/MyDrive/dating_bot_ai/colab_train.py` in a single Colab cell
 
 import glob
 import os
@@ -10,22 +9,23 @@ import subprocess
 import sys
 
 # =====================================================================
-# 1. CONFIGURATION (EDIT THESE SETTINGS ONCE)
+# 1. CONFIGURATION (PRE-CONFIGURED FOR xithu01/dating_bot_ai)
 # =====================================================================
 GITHUB_USER = "xithu01"
 GITHUB_REPO = "dating_bot_ai"
-USE_PRIVATE_TOKEN = True       # Set True for private repo (save GITHUB_TOKEN in Colab Secrets)
+USE_PRIVATE_TOKEN = True        # Reads GITHUB_TOKEN from Colab Secrets (supports github_pat_ & ghp_)
 
 TRAIN_FLAG = ""                 # "" = protect old steps & train only new/missing steps
-                                # Or use: "--step1", "--step2", "--step3", "--all"
-CLEAR_OLD_TXT = False           # Set True after changing dataset generators to rebuild .txt files
+                                # Or set: "--step1", "--step2", "--step3", "--all"
+CLEAR_OLD_TXT = False           # Set True after editing dataset builders to rebuild .txt files
 
 USE_DRIVE_BACKUP = True         # Restores old model_weights.npz from Drive & saves updated copy
-PUSH_WEIGHTS_TO_GIT = True     # Set True to push ONLY model_weights.npz to GitHub (needs token)
-DOWNLOAD_TO_PC = True           # Auto-downloads model_weights.npz to your PC when finished
+DOWNLOAD_TO_PC = True           # Downloads model_weights.npz to your PC before git push
+PUSH_WEIGHTS_TO_GIT = True      # Commits & pushes ONLY model_weights.npz to GitHub
 
 REPO_DIR = "/content/dating_bot_ai"
-DRIVE_VAULT = "/content/drive/MyDrive/dating_bot_ai/model_weights.npz"
+DRIVE_DIR = "/content/drive/MyDrive/dating_bot_ai"
+DRIVE_VAULT = os.path.join(DRIVE_DIR, "model_weights.npz")
 LOCAL_VAULT = os.path.join(REPO_DIR, "model_weights.npz")
 
 
@@ -50,21 +50,25 @@ def run_cmd(cmd, cwd=None, check=True):
 def build_repo_url():
     if USE_PRIVATE_TOKEN:
         from google.colab import userdata
-        token = userdata.get("GITHUB_TOKEN")
+        token = (userdata.get("GITHUB_TOKEN") or "").strip()
         if not token:
-            raise ValueError("Missing GITHUB_TOKEN in Colab Secrets (key icon on left sidebar).")
-        return f"https://{token}@github.com/{GITHUB_USER}/{GITHUB_REPO}.git"
+            raise ValueError("Missing GITHUB_TOKEN in Colab Secrets (Key icon on left sidebar).")
+        return f"https://x-access-token:{token}@github.com/{GITHUB_USER}/{GITHUB_REPO}.git"
     return f"https://github.com/{GITHUB_USER}/{GITHUB_REPO}.git"
 
 
 def main():
-    if GITHUB_USER == "YOUR_USERNAME" or GITHUB_REPO == "YOUR_REPO":
-        raise ValueError("Please set GITHUB_USER and GITHUB_REPO at the top of this script first.")
+    # --- STEP 1: MOUNT DRIVE (IF ENABLED) ---
+    if USE_DRIVE_BACKUP:
+        from google.colab import drive
+        if not os.path.exists("/content/drive/MyDrive"):
+            drive.mount("/content/drive")
+        os.makedirs(DRIVE_DIR, exist_ok=True)
 
-    # --- STEP 1: CLONE OR PULL LATEST CODE FROM GIT ---
+    # --- STEP 2: CLONE OR PULL LATEST CODE FROM GITHUB ---
     repo_url = build_repo_url()
     if os.path.exists(os.path.join(REPO_DIR, ".git")):
-        print("[GIT] Repo exists -> Pulling latest code updates...", flush=True)
+        print("[GIT] Repo exists -> Updating token URL & pulling latest code...", flush=True)
         run_cmd(["git", "remote", "set-url", "origin", repo_url], cwd=REPO_DIR)
         run_cmd(["git", "pull", "--rebase", "--autostash"], cwd=REPO_DIR)
     else:
@@ -73,28 +77,18 @@ def main():
 
     os.chdir(REPO_DIR)
 
-    # --- STEP 2: RESTORE OLD model_weights.npz IF IT EXISTS ---
-    if USE_DRIVE_BACKUP:
-        from google.colab import drive
-        if not os.path.exists("/content/drive/MyDrive"):
-            drive.mount("/content/drive")
-        os.makedirs(os.path.dirname(DRIVE_VAULT), exist_ok=True)
-        if os.path.exists(DRIVE_VAULT):
-            shutil.copy2(DRIVE_VAULT, LOCAL_VAULT)
-            kb = os.path.getsize(LOCAL_VAULT) / 1024.0
-            print(f"[VAULT] Loaded existing model_weights.npz from Google Drive ({kb:.2f} KB)", flush=True)
-        elif os.path.exists(LOCAL_VAULT):
-            kb = os.path.getsize(LOCAL_VAULT) / 1024.0
-            print(f"[VAULT] Using existing model_weights.npz from Git ({kb:.2f} KB)", flush=True)
-        else:
-            print("[VAULT] No old model_weights.npz found -> Training fresh vault.", flush=True)
+    # --- STEP 3: RESTORE OLD model_weights.npz IF IT EXISTS ---
+    if USE_DRIVE_BACKUP and os.path.exists(DRIVE_VAULT):
+        shutil.copy2(DRIVE_VAULT, LOCAL_VAULT)
+        kb = os.path.getsize(LOCAL_VAULT) / 1024.0
+        print(f"[VAULT] Loaded existing model_weights.npz from Google Drive ({kb:.2f} KB)", flush=True)
     elif os.path.exists(LOCAL_VAULT):
         kb = os.path.getsize(LOCAL_VAULT) / 1024.0
         print(f"[VAULT] Using existing model_weights.npz from Git ({kb:.2f} KB)", flush=True)
     else:
         print("[VAULT] No old model_weights.npz found -> Training fresh vault.", flush=True)
 
-    # --- STEP 3: OPTIONAL CLEAN REBUILD OF .TXT DATASETS ---
+    # --- STEP 4: OPTIONAL CLEAN REBUILD OF .TXT DATASETS ---
     if CLEAR_OLD_TXT:
         removed = 0
         for txt_path in glob.glob(os.path.join(REPO_DIR, "*.txt")):
@@ -103,7 +97,7 @@ def main():
                 removed += 1
         print(f"[DATASETS] Cleared {removed} old .txt dataset file(s) for clean rebuild.", flush=True)
 
-    # --- STEP 4: RUN OFFLINE TRAINER (STREAMS LIVE ETA) ---
+    # --- STEP 5: RUN OFFLINE TRAINER (STREAMS LIVE 1s ETA) ---
     train_cmd = [sys.executable, "offline_train.py"]
     if TRAIN_FLAG.strip():
         train_cmd.extend(TRAIN_FLAG.strip().split())
@@ -116,28 +110,29 @@ def main():
     final_kb = os.path.getsize(LOCAL_VAULT) / 1024.0
     print(f"[DONE] Vault ready: {LOCAL_VAULT} ({final_kb:.2f} KB)", flush=True)
 
-    # --- STEP 5: BACK UP UPDATED model_weights.npz TO GOOGLE DRIVE ---
+    # --- STEP 6: BACK UP UPDATED model_weights.npz TO GOOGLE DRIVE ---
     if USE_DRIVE_BACKUP:
         shutil.copy2(LOCAL_VAULT, DRIVE_VAULT)
         print(f"[DRIVE] Saved updated model_weights.npz to Google Drive ({final_kb:.2f} KB)", flush=True)
 
-    # --- STEP 6: PUSH ONLY model_weights.npz TO GIT (OPTIONAL) ---
-    if PUSH_WEIGHTS_TO_GIT:
-        run_cmd(["git", "config", "user.name", "Colab Trainer"], cwd=REPO_DIR)
-        run_cmd(["git", "config", "user.email", "trainer@local"], cwd=REPO_DIR)
-        run_cmd(["git", "add", "model_weights.npz"], cwd=REPO_DIR)
-        rc = run_cmd(["git", "commit", "-m", "Update model_weights.npz"], cwd=REPO_DIR, check=False)
-        if rc == 0:
-            run_cmd(["git", "push"], cwd=REPO_DIR)
-            print("[GIT] Pushed updated model_weights.npz to GitHub.", flush=True)
-        else:
-            print("[GIT] model_weights.npz unchanged; skipped push.", flush=True)
-
-    # --- STEP 7: DOWNLOAD model_weights.npz TO PC (OPTIONAL) ---
+    # --- STEP 7: DOWNLOAD model_weights.npz TO PC FIRST ---
     if DOWNLOAD_TO_PC:
         from google.colab import files
         print("[DOWNLOAD] Sending model_weights.npz to your PC...", flush=True)
         files.download(LOCAL_VAULT)
+
+    # --- STEP 8: PUSH ONLY model_weights.npz TO GITHUB ---
+    if PUSH_WEIGHTS_TO_GIT:
+        run_cmd(["git", "remote", "set-url", "origin", repo_url], cwd=REPO_DIR)
+        run_cmd(["git", "config", "user.name", "Colab Trainer"], cwd=REPO_DIR)
+        run_cmd(["git", "config", "user.email", "trainer@local"], cwd=REPO_DIR)
+        run_cmd(["git", "add", "model_weights.npz"], cwd=REPO_DIR)
+        run_cmd(["git", "commit", "-m", "Update model_weights.npz"], cwd=REPO_DIR, check=False)
+        rc = run_cmd(["git", "push"], cwd=REPO_DIR, check=False)
+        if rc == 0:
+            print("[GIT] Pushed updated model_weights.npz to GitHub.", flush=True)
+        else:
+            print("[GIT WARNING] Push failed (check token Contents=Read/Write), but Drive & PC download succeeded.", flush=True)
 
 
 if __name__ == "__main__":
