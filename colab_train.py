@@ -20,7 +20,7 @@ TRAIN_FLAG = ""                 # "" = protect old steps & train only new/missin
 CLEAR_OLD_TXT = False           # Set True after editing dataset builders to rebuild .txt files
 
 USE_DRIVE_BACKUP = True         # Restores old model_weights.npz from Drive & saves updated copy
-DOWNLOAD_TO_PC = True           # Downloads model_weights.npz to your PC before git push
+DOWNLOAD_TO_PC = False           # Downloads model_weights.npz to your PC before git push
 PUSH_WEIGHTS_TO_GIT = True      # Commits & pushes ONLY model_weights.npz to GitHub
 
 REPO_DIR = "/content/dating_bot_ai"
