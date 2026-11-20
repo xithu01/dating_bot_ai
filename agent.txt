@@ -210,3 +210,8 @@ python step14_bot_check.py
 
 python build_step15_pack_txt.py
 python step15_dating_pack.py
+
+
+%run colab_train.py
+
+GITHUB_TOKEN 

@@ -1,0 +1,16 @@
+# Bot Logs
+bot_logs.log*
+*.log
+
+# Environment Variables (Crucial: Never push your BOT_TOKEN or DATABASE_URL!)
+.env
+
+# Python Cache & Virtual Environments
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+env/
+protected/
+test_data.js
+agent.txt
