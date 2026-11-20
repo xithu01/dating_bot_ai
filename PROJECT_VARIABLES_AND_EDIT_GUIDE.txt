@@ -1,0 +1,293 @@
+================================================================================
+FILE: PROJECT_VARIABLES_AND_EDIT_GUIDE.txt
+PURPOSE: Complete Variable-by-Variable & Line-by-Line Reference for All
+         `offline_*.py`, `production_server.py`, and `build_*_txt.py` Files
+         + Exact Guide for Editing Reply Texts, Keyboards, Seeds & New Steps
+================================================================================
+
+================================================================================
+1. HOW TO EDIT BOT REPLY TEXTS & KEYBOARDS (`POOLS` IN `offline_spec_01..05.py`)
+================================================================================
+Every bot reply in the entire AI lives inside the `POOLS` dictionary of the 5
+spec files (`offline_spec_01_core.py` through `offline_spec_05_step17_english.py`).
+After editing any text in `POOLS`, simply run:
+   python offline_train.py
+It will re-pack `http_blob_u8` into `model_weights.npz` automatically!
+
+A. EXACT FORMAT OF A `POOLS` ENTRY:
+--------------------------------------------------------------------------------
+    "pool_key": (
+        class_id,          # int (0..54 or 99) -> JSON "class_id"
+        "false",           # str ("true" only for Class 1 & 6, else "false") -> JSON "is_greeting"
+        "intent_name",     # str -> JSON "intent"
+        (                  # tuple of reply strings -> JSON "reply"
+            "reply variation 1",
+            "reply variation 2",
+            "reply variation 3",
+            "reply variation 4",
+            "reply variation 5",
+            "reply variation 6",
+            "reply variation 7",
+            "reply variation 8",
+        ),
+        '["btn 1","btn 2","btn 3"]',  # valid JSON array string -> JSON "kbd"
+    ),
+
+B. 3 GOLDEN RULES WHEN EDITING REPLY TEXTS (NEVER VIOLATE!):
+--------------------------------------------------------------------------------
+1. POWER-OF-2 TUPLE LENGTH (1, 8, 16, or 32 strings per pool):
+   - `production_server.py` uses bitwise AND (`rot & pool_mask`) where
+     `pool_mask = len(msgs) - 1` for O(1) zero-division rotation.
+   - Therefore, every reply tuple MUST contain exactly **8 strings**
+     (or **32 strings** for `"greet_first"`, or **1 string** for `"reject"`,
+     `"underage"`, `"reset"`). NEVER put 7, 9, or 10 strings in a pool!
+2. STEP 9 PERSONA-LOCKED NAME POOLS (`plock=1` on Leaves 27 & 28):
+   - In `"name_ask_f"`, `"name_ask_f_rep"`, `"name_tell_f"`, `"name_tell_f_cmp"`:
+     * EVEN indices (0, 2, 4, 6) MUST use the name **"Emma"**.
+     * ODD indices  (1, 3, 5, 7) MUST use the name **"Sarah"**.
+   - In `"name_ask_m"`, `"name_ask_m_rep"`, `"name_tell_m"`, `"name_tell_m_cmp"`:
+     * EVEN indices (0, 2, 4, 6) MUST use the name **"Alex"**.
+     * ODD indices  (1, 3, 5, 7) MUST use the name **"Liam"**.
+   - Why? `production_server.py` indexes `plock=1` pools via
+     `idx = ((uid & 1) | ((rot & 3) << 1))` so each user's bot keeps the
+     exact same name across the entire session!
+3. STEP 14 BOT-CHECK POOLS (`"bot_no"`, `"bot_no_cmp"`, `"bot_real"`, `"bot_real_cmp"`, `"bot_rep"`):
+   - NEVER start a reply with `"yes"`! Always say `"haha no im not a bot! im 100% real :)"`
+     or `"im 100% real, not a bot haha! :)"`.
+
+C. COMPLETE DIRECTORY OF ALL 99 `POOLS` KEYS & WHERE TO EDIT THEM:
+--------------------------------------------------------------------------------
+[1] `offline_spec_01_core.py` (Steps 1-7 + Reset + Ask-Back + Chatting-with-u):
+  - "reject"           (Class 0,  Leaf 0/76): Fallback when message is invalid
+  - "underage"         (Class 7,  Leaf 7):    18+ only warning (ages 1..17)
+  - "reset"            (Class 99, Leaf 75):   New chat started ("next", "/start")
+  - "greet_first"      (Class 1,  Leaf 1):    32-item first greeting pool
+  - "greet_rep"        (Class 1,  Leaf 1):    8-item repeat greeting pool
+  - "ask_age"          (Class 2,  Leaf 2):    Bot tells its age (22/23) & asks user's age
+  - "ask_age_rep"      (Class 2,  Leaf 2):    Repeat ask-age / "24"->"u?" follow-up
+  - "tell_age"         (Class 3,  Leaf 3):    User told age (country not known yet -> asks country)
+  - "tell_age_cmp"     (Class 3,  Leaf 3/12..15): User told age (country already known -> asks day/wyd)
+  - "tell_age_rep"     (Class 3,  Leaf 3):    User repeated the same age
+  - "tell_age_chg"     (Class 3,  Leaf 3):    User changed their age from earlier
+  - "ask_ctry"         (Class 4,  Leaf 4):    Bot tells its country (usa/uk/canada)
+  - "ask_ctry_rep"     (Class 4,  Leaf 4):    Repeat ask-country / "usa"->"u?" follow-up
+  - "tell_ctry"        (Class 5,  Leaf 5):    User told country (age not known yet -> asks age)
+  - "tell_ctry_cmp"    (Class 5,  Leaf 5):    User told country (age already known -> asks day/wyd)
+  - "tell_ctry_rep"    (Class 5,  Leaf 5):    User repeated the same country
+  - "tell_ctry_chg"    (Class 5,  Leaf 5):    User changed their country from earlier
+  - "tell_age_ctry"    (Class 6,  Leaf 6):    User told both age & country ("24 from uk")
+  - "ask_hru"          (Class 8,  Leaf 8):    User asked "how are you" / "hru"
+  - "g_choice_f"       (Class 9,  Leaf 9):    User asked "m or f?" -> Female Bot ("im F :) u?")
+  - "g_choice_m"       (Class 9,  Leaf 9):    User asked "m or f?" -> Male Bot ("im M :) u?")
+  - "g_choice_f_known" (Class 9,  Leaf 9):    User said "M" then "u" -> Female Bot ("im F :) how old r u?" - no "u?")
+  - "g_choice_m_known" (Class 9,  Leaf 9):    User said "F" then "u" -> Male Bot ("im M :) how old r u?" - no "u?")
+  - "g_yes_f"          (Class 10, Leaf 10):   User asked "are u a girl?" -> Female Bot ("yes im a girl!")
+  - "g_no_m"           (Class 10, Leaf 10):   User asked "are u a girl?" -> Male Bot ("no im a guy actually!")
+  - "g_no_f"           (Class 11, Leaf 11):   User asked "are u a boy?"  -> Female Bot ("no im a girl actually!")
+  - "g_yes_m"          (Class 11, Leaf 11):   User asked "are u a boy?"  -> Male Bot ("yes im a guy!")
+  - "g_st_f_bf"        (Class 12, Leaf 12):   User is Female -> Female Bot ("im F too! how old r u?")
+  - "g_st_f_bm"        (Class 12, Leaf 12):   User is Female -> Male Bot ("im M! how old r u?")
+  - "g_st_m_bf"        (Class 13, Leaf 13):   User is Male   -> Female Bot ("im F! how old r u?")
+  - "g_st_m_bm"        (Class 13, Leaf 13):   User is Male   -> Male Bot ("im M too! how old r u?")
+  - "g_age_gen_f"      (Class 14, Leaf 14/15): User gave age+gender ("24m") -> Female Bot ("nice! im F, 22, where r u from?")
+  - "g_age_gen_m"      (Class 14, Leaf 14/15): User gave age+gender ("22f") -> Male Bot ("nice! im M, 23, where r u from?")
+  - "ask_wyd"          (Class 15, Leaf 16):   User asked "wyd" / "what are you doing"
+  - "ask_wyd_rep"      (Class 15, Leaf 16):   User asked "wyd" a second time
+  - "st_pos"           (Class 16, Leaf 17):   User status positive ("im good", "chilling") - incomplete profile
+  - "st_pos_cmp"       (Class 16, Leaf 17):   User status positive - complete profile (age+country known)
+  - "st_chat_u"        (Class 16, Leaf 77):   User said "Chatting with u" / "texting u" - incomplete profile
+  - "st_chat_u_cmp"    (Class 16, Leaf 77):   User said "Chatting with u" / "texting u" - complete profile
+  - "st_neg"           (Class 17, Leaf 18):   User status negative ("bored", "nothing much") - incomplete profile
+  - "st_neg_cmp"       (Class 17, Leaf 18):   User status negative - complete profile
+  - "st_ab"            (Class 18, Leaf 19):   User status + ask-back ("im good u?", "nmu", or "Chatting with u"->"u")
+  - "flirt"            (Class 19, Leaf 20):   User complimented/flirted ("ur cute", "i like u") - incomplete profile
+  - "flirt_cmp"        (Class 19, Leaf 20):   User complimented/flirted - complete profile
+  - "react"            (Class 20, Leaf 21):   User short reaction ("haha", "lol", "same", "sam", "ok") - incomplete
+  - "react_cmp"        (Class 20, Leaf 21):   User short reaction - complete profile
+
+[2] `offline_spec_02_dating.py` (Steps 8-11: Looking For, Names, Hobbies, Rel Status):
+  - "look_ask_f" / "look_ask_m" / "look_ask_rep" (Class 21, Leaf 22): "what r u looking for?" (Bot F / Bot M / Repeat)
+  - "look_fr" / "look_fr_cmp"       (Class 22, Leaf 23): User looking for friends/chat (incomplete / complete)
+  - "look_g_bf" / "look_g_bf_cmp"   (Class 22, Leaf 24): User looking for a girl/gf -> Female Bot (inc / cmp)
+  - "look_g_bm"                     (Class 22, Leaf 24): User looking for a girl/gf -> Male Bot
+  - "look_b_bf" / "look_b_bm"       (Class 22, Leaf 25): User looking for a boy/bf  -> Female Bot / Male Bot
+  - "look_dat" / "look_dat_cmp"     (Class 22, Leaf 26): User looking for dating/relationship (inc / cmp)
+  - "name_ask_f" / "name_ask_m"     (Class 23, Leaf 27): "whats ur name?" (Emma/Sarah for F, Alex/Liam for M)
+  - "name_ask_f_rep" / "name_ask_m_rep" (Class 23, Leaf 27): Repeat ask-name / "im hatem"->"u?" follow-up
+  - "name_tell_f" / "name_tell_f_cmp" (Class 24, Leaf 28): User told name -> Female Bot (inc / cmp)
+  - "name_tell_m" / "name_tell_m_cmp" (Class 24, Leaf 28): User told name -> Male Bot (inc / cmp)
+  - "name_tell_rep"                 (Class 24, Leaf 28): User repeated their name
+  - "hb_ask_mus" / "hb_ask_gam" / "hb_ask_mov" / "hb_ask_spt" / "hb_ask_gen" (Class 25, Leaves 29..33): Ask hobbies
+  - "hb_tell_mus" / "hb_tell_gam" / "hb_tell_mov" / "hb_tell_spt" / "hb_tell_gen" (Class 26, Leaves 34..38): Tell hobbies
+  - "rel_ask_f" / "rel_ask_m" / "rel_ask_rep" (Class 27, Leaf 39): "are u single or mariid?" (Bot F / Bot M / Repeat)
+  - "rel_single" / "rel_single_cmp" (Class 28, Leaf 40): User is single / "im not married" / "no gf" (inc / cmp)
+  - "rel_taken"                     (Class 28, Leaf 41): User is taken / "im in a relationship"
+  - "rel_married"                   (Class 28, Leaf 42): User is married / "lm mariid"
+
+[3] `offline_spec_03_live.py` (Steps 12-15: Private/YN, Pic, Bot Check, Dating Pack):
+  - "priv_tg" / "priv_tg_cmp"       (Class 29, Leaf 43): "can we talk privty" / "ur telegram?" (inc / cmp)
+  - "priv_soc" / "priv_soc_cmp"     (Class 29, Leaf 44): "do u have snap?" / "ur insta?" (inc / cmp)
+  - "priv_rep"                      (Class 29, Leaf 43/44): Repeat private/social request
+  - "yn_yes" / "yn_yes_cmp"         (Class 30, Leaf 45): "yes" / "yes plz" (inc / cmp)
+  - "yn_no" / "yn_no_cmp"           (Class 30, Leaf 46): "no" / "nope" / "i dont have snap" (inc / cmp)
+  - "yn_may" / "yn_may_cmp"         (Class 30, Leaf 47): "maybe" / "idk" / "lets stay here" (inc / cmp)
+  - "pic_ask" / "pic_ask_cmp" / "pic_rep" (Class 31, Leaf 48): "send pic" / "send selfie" (inc / cmp / repeat)
+  - "app_f" / "app_m"               (Class 31, Leaf 49): "what do u look like?" / "how tall r u?" (Bot F / Bot M)
+  - "pic_off" / "pic_ref"           (Class 32, Leaf 50/51): "wanna see me?" (50) / "u first" or "no pics" (51)
+  - "bot_no" / "bot_no_cmp"         (Class 33, Leaf 52): "are u a bot?" -> Explicit NO! (inc / cmp)
+  - "bot_real" / "bot_real_cmp"     (Class 34, Leaf 53): "are u real?" -> "im 100% real, not a bot!" (inc / cmp)
+  - "bot_rep"                       (Class 33, Leaf 52/53): Repeat bot/real check
+  - "s15_bye" / "s15_gn" / "s15_brb" (Class 35, Leaves 54..56): Goodbye (54), Goodnight (55), BRB (56)
+  - "s15_wk_ask" / "s15_wk_tell"    (Class 36, Leaves 57..58): Work/Study question (57) & statement (58)
+  - "s15_lang" / "s15_badeng"       (Class 37, Leaves 59..60): Language check (59) & "my english is bad" (60)
+  - "s15_ama" / "s15_tod" / "s15_bio_f" / "s15_bio_m" (Class 38, Leaves 61..63): AMA (61), Truth/Dare (62), Bio (63)
+  - "s15_like" / "s15_meet" / "s15_aff" (Class 39, Leaves 64..66): "do u like me?" (64), "can we meet?" (65), "i miss u" (66)
+  - "s15_thx" / "s15_sry"           (Class 40, Leaves 67..68): "thanks" (67) & "sorry"/"my bad" (68)
+  - "s15_ping" / "s15_clar"         (Class 41, Leaves 69..70): "u there?" (69) & "wdym" (70)
+  - "s15_nsfw" / "s15_rude"         (Class 42, Leaves 71..72): NSFW shield (71) & Rude/toxic shield (72)
+  - "s15_time" / "s15_wthr"         (Class 43, Leaves 73..74): Timezone/late night (73) & Weather (74)
+
+[4] `offline_spec_04_step16.py` (Step 16: Interactive Games, Vibe, Type, Lifestyle, Jokes, Food):
+  - "s16_truth" / "s16_dare"        (Class 44, Leaves 78..79): User picks "truth" (78) or "dare" (79)
+  - "s16_vibe"                      (Class 45, Leaf 80): "night owl", "introvert", "beach and music", "coffee"
+  - "s16_type_f" / "s16_type_m"     (Class 46, Leaf 81): "whats ur type?" / "whats ur green flag" (Bot F / Bot M)
+  - "s16_ldr"                       (Class 46, Leaf 82): "do u mind long distance?" / "does age matter?"
+  - "s16_life_ask" / "s16_life_tell" (Class 47, Leaves 83..84): Pets/smoke/drink/siblings ask (83) & tell (84)
+  - "s16_zodiac"                    (Class 47, Leaf 85): "whats ur zodiac sign?" / "im a scorpio"
+  - "s16_joke" / "s16_vent"         (Class 48, Leaves 86..87): "tell me a joke" (86) & "i had a bad day"/"broke up" (87)
+  - "s16_food_ask" / "s16_food_tell" (Class 49, Leaves 88..89): "whats ur fav food?" (88) & "im hungry"/"i love pizza" (89)
+
+[5] `offline_spec_05_step17_english.py` (Step 17: Natural Conversational English):
+  - "s17_fast" / "s17_fast_cmp"     (Class 50, Leaf 90): "Bcz you make it to fast." / "u type too fast" (inc / cmp)
+  - "s17_reason" / "s17_reason_cmp" (Class 51, Leaf 91): "bcz im bored" / "cuz nothing to do" (inc / cmp)
+  - "s17_trust" / "s17_trust_cmp"   (Class 52, Leaf 92): "i believe u" / "that makes sense" (inc / cmp)
+  - "s17_doubt" / "s17_doubt_cmp"   (Class 52, Leaf 93): "i dont believe u" / "no way" / "really?" (inc / cmp)
+  - "s17_bridge" / "s17_bridge_cmp" (Class 53, Leaf 94): "i guess" / "kinda" / "maybe later" / "up to u" (inc / cmp)
+  - "s17_why"                       (Class 54, Leaf 95): "why do u ask?" / "how come?" / "just curious"
+
+================================================================================
+2. ALL INTERNAL VARIABLES OF `offline_spec_0X_*.py` & HOW TO EDIT THEM
+================================================================================
+Every `offline_spec_0X_*.py` file exports up to 8 top-level objects auto-discovered
+by `offline_fsm_compiler.py`:
+
+1. `POOLS` (dict):
+   - Maps `pool_key_str -> (class_id, is_g_str, intent_str, replies_tuple_len_8, kbd_json_str)`.
+2. `LEAF_BINDINGS` (tuple of 4-tuples):
+   - Format: `(leaf_id, class_id, "p_norm", {optional_kwargs_dict})`
+   - Supported keys inside `optional_kwargs_dict`:
+     * `"p_cmp"`:    Pool key when user profile is complete (`age >= 18 and country > 0`).
+     * `"p_part"`:   Pool key when user profile is partial (`age >= 18` only).
+     * `"p_rep"`:    Pool key when user repeats this intent (`(flags_lo & chk) != 0` or same age/country).
+     * `"p_chg"`:    Pool key when user changes their age or country (`RULE_AGE` / `RULE_COUNTRY`).
+     * `"p_m"`:      Pool key for Male Bot (`bot_gender == 1`, normal state).
+     * `"p_m_cmp"`:  Pool key for Male Bot (complete profile state).
+     * `"p_m_rep"`:  Pool key for Male Bot (repeat state).
+     * `"p_m_part"`: Pool key for Male Bot (partial profile state).
+     * `"chk"`:      `np.uint32` bitmask in `flags_lo` to check for repeat (`F_ASKED_AGE`, `F_BOT_NAMED`, etc.).
+     * `"set_f"`:    `np.uint32` bitmask in `flags_lo` to set after this leaf triggers (default `F_GREETED`).
+     * `"rule"`:     Entity rule code (`RULE_STD=0`, `RULE_AGE=1`, `RULE_COUNTRY=2`, `RULE_SET_G_F=3`, `RULE_SET_G_M=4`, `RULE_GREET=5`).
+     * `"plock"`:    `1` to lock bit 0 of pool index to `uid & 1` (used for Step 9 Emma/Sarah & Alex/Liam).
+3. `LEAF_STEP_BITS` (dict):
+   - Maps `leaf_id -> int (1..29)`. Sets which bit in `super_bloom_u32` is activated by words in this leaf.
+4. `ASKBACK_REDIRECTS` (tuple of 2-tuples):
+   - Format: `((prev_leaf_id, target_leaf_id), ...)`
+   - Compiles into `askback_redirect_u8[prev_leaf_id] = target_leaf_id`. When user sends `"u"` / `"u?"` / `"wbu?"` (`Leaf 76`) on the next turn, it redirects to `target_leaf_id`.
+5. `CORE_LEAF_SEEDS` (dict):
+   - Maps `leaf_id -> ("phrase 1", "phrase 2", ...)`.
+   - Trained at high weight (`28.0` for positive leaves, `45.0` for `Leaf 0, 76, 77`) so core phrases always override noisy external `.txt` lines.
+   - **To add a new English phrase to an existing intent:** Simply add the lowercase string to `CORE_LEAF_SEEDS[leaf_id]`!
+6. `ZERO_FAULT_SUITE` (tuple of 3-tuples):
+   - Format: `((b"raw user message", expected_class_id, expected_leaf_id), ...)`
+   - Verified in Pure NumPy INT8 before `offline_train.py` exports `model_weights.npz`.
+7. `MULTI_TURN_SUITE` (tuple of 2-tuples, optional):
+   - Format: `(((b"turn1_msg", b"turn2_msg"), (expected_leaf1, expected_leaf2)), ...)`
+8. `load_txt_samples(sample_map, load_fn)` (function, optional):
+   - Calls `load_fn("filename.txt", cap)` and inserts `(leaf_id, np.float32(weight))` into `sample_map`.
+
+================================================================================
+3. INTERNAL VARIABLE & FUNCTION MAP OF CORE ENGINE FILES
+================================================================================
+
+[A] `offline_encoder.py` (209 lines — Pure NumPy Encoder & INT8 Forward Verifier)
+--------------------------------------------------------------------------------
+* Constants:
+  - `BLOOM_SIZE = 65536`, `WORD_VOCAB = 4096`, `BIGRAM_VOCAB = 8192`
+  - `WORD_MOD = 4091` (Prime modulus for unigram word hashing — prevents `'gf'` vs `'bf'` bitmask collision)
+  - `BIGRAM_MOD = 8191` (Mersenne prime modulus for ordered bigram hashing)
+  - `TOK_COUNTRY = 4093`, `TOK_NAME_F = 4094`, `TOK_NAME_M = 4095` (Canonical entity token IDs)
+  - `D_EMB = 64`, `D_STRUCT = 16`, `D_IN = 128`, `D_HID1 = 256`, `D_HID2 = 128`, `MAX_LEN = 45`
+  - `BIT_WILDCARD_NAME = np.uint32(1 << 30)` (Marks `"name"`/`"call"` for wildcard `"my name is <X>"`)
+  - `BIT_GLOBAL_KNOWN = np.uint32(1 << 31)` (Marks every whitelisted vocabulary word across all steps)
+  - `COUNTRY_GROUPS` (19 curated country ID tuples), `DEFAULT_F_NAMES`, `DEFAULT_M_NAMES`, `NAME_BLACKLIST`
+* Functions:
+  - `quantize_to_int8(w_fp32) -> (q_int8, scale_f32_array)`
+  - `make_shared_luts() -> (char_lut, rej_lut, wp_mat)`
+  - `collapse_str(s) -> collapsed_str` (Collapses consecutive duplicate chars: `"hiiii"` -> `"hi"`)
+  - `canonical_sig(s) -> (collapsed_words_tuple, has_q, has_s)`
+  - `build_entity_and_super_bloom(sample_map, wp_mat, leaf_step_map) -> (super_bloom, entity_lut_a, entity_lut_b)`
+  - `encode_message_exact(raw_bytes, char_lut, rej_lut, wp_mat, super_bloom, entity_lut_a, entity_lut_b) -> (fast_leaf, age_val, ctry_id, w_ids[6], bg_ids[7], s_vec[16])`
+  - `numpy_forward_single(raw_bytes, ..., np_w) -> pred_leaf_id`
+
+[B] `offline_fsm_compiler.py` (154 lines — Auto-Spec Loader & Binary Table Packer)
+--------------------------------------------------------------------------------
+* Constants:
+  - `F_ZERO` .. `F_BOT_CHECKED` (`np.uint32` conversation bitflags `1 << 0` .. `1 << 15`)
+  - `RULE_STD = 0`, `RULE_AGE = 1`, `RULE_COUNTRY = 2`, `RULE_SET_G_F = 3`, `RULE_SET_G_M = 4`, `RULE_GREET = 5`
+* Classes & Functions:
+  - `CompiledSpecBundle` (`__slots__`: `num_leaves`, `fsm_tables`, `leaf_step_map`, `core_seeds`, `zero_fault_suite`, `multi_turn_suite`, `txt_loaders`, `spec_names`)
+  - `discover_and_compile_all_specs(spec_pattern="offline_spec_*.py") -> CompiledSpecBundle`
+
+[C] `offline_train.py` (217 lines — Vault-Driven Auto-Builder & PyTorch Trainer)
+--------------------------------------------------------------------------------
+* Functions:
+  - `_compute_specs_digest() -> np.uint8[32]` (SHA-256 of encoder, compiler, and all `offline_spec_*.py`)
+  - `_compute_builder_manifest() -> dict {py_file: sha16}` (SHA-256 of all `build_*_txt.py`)
+  - `verify_hardware_and_lock_ram() -> ram_arena_u8` (Locks 75% free RAM)
+  - `collect_samples(bundle) -> sample_map`
+  - `run_unified_compiler(output_path="model_weights.npz", force=False, rebuild_data=False)`:
+    1) Checks `model_weights.npz` first (`specs_digest_u8` & `builder_manifest_u8`). If unchanged, exits in 0.05s.
+    2) Auto-runs ONLY new/changed `build_*_txt.py` via `runpy.run_path` (or all if `.npz` is missing).
+    3) Carries forward `prev_ea`, `prev_eb`, `prev_bloom` from existing `.npz` so deleted `.txt` files never lose names/countries.
+    4) Trains `UnifiedRoutingNet` (`emb_word`, `emb_bg`, `pos_emb`, `w_struct`, `w1`, `b1`, `w2`, `b2`, `w_out`, `b_out`) with 1.0s ETA logging.
+    5) Runs up to 6 Adversarial Hard-Negative Boost rounds until Single-Turn AND Multi-Turn Pure-NumPy INT8 Zero-Fault Gates pass 100.0%.
+    6) Audits all array dtypes (0 `float64`/`int64`) and saves `model_weights.npz`.
+
+[D] `production_server.py` (295 lines — Single-File Zero-Logic Pure-NumPy VM)
+--------------------------------------------------------------------------------
+* Classes:
+  - `CompiledVMModel` (`__slots__`): Loads `model_weights.npz` once via `mmap_mode="r"`, dequantizes `int8 -> float32` read-only arrays, exposes `http_blob_mv = memoryview(self.http_blob_u8)`.
+  - `InferenceSlot` (`__slots__`): Pre-allocated per-worker scratch buffers (`raw_u8`, `rej_mask`, `words_mat`, `w_hashes`, `w_b_idx`, `sb_hits`, `sb_word`, `ea`, `eb`, `w_ids`, `bg_ids`, `s_vec`, `w_emb`, `w_mask_b`, `w_mask`, `bg_emb`, `bg_mask_b`, `bg_mask`, `x_in`, `st_proj`, `h1`, `h2`, `logits`).
+  - `UserStore` (`__slots__`): `last_intent`, `last_leaf`, `msg_count`, `age`, `country`, `gender`, `bot_gender`, `flags_lo`, `flags_hi`, `last_ts`, `write_queue`, `wal_batch` for `MAX_USERS = 50000`.
+* Functions:
+  - `vm_forward_pass(m, s, mv_payload) -> (best_leaf, age_val, ctry_id)`
+  - `_reset_user(u, uid)` (Zeroes all user state arrays including `last_leaf`, `flags_lo`, `flags_hi`)
+  - `vm_handle_query(m, s, u, uid, mv_payload) -> memoryview_http_slice`
+  - `wal_write_behind_worker(users, wal_path="events_wal.bin")`
+  - `start_server(host="127.0.0.1", port=8080)`
+
+================================================================================
+4. DIRECTORY OF ALL 16 `build_*_txt.py` DATASET GENERATORS (OFFLINE ONLY)
+================================================================================
+All 16 builders enforce Rules 12 & 13 (`HF_DATASETS_TRUST_REMOTE_CODE="0"`,
+`revision="refs/convert/parquet"`, 7-bit ASCII sanitizer `_sanitize_ascii_bytes`,
+closed vocabulary whitelist `STRICT_ALLOWED_*_VOCAB`, cross-step collision regex
+`STEP*_COLLISION_RE`, and canonical deduplication `_canonical_token_sig`):
+
+ 1. `build_greetings_txt.py`      -> `greetings.txt`, `negatives.txt` (`generate_greetings_and_negatives`)
+ 2. `build_age_country_txt.py`    -> `ages.txt`, `countries.txt` (`build_age_and_country_files`)
+ 3. `build_hru_txt.py`            -> `hru.txt` (`build_hru_file`)
+ 4. `build_gender_txt.py`         -> `gender_ask_choice.txt`, `gender_ask_is_female.txt`, `gender_ask_is_male.txt`, `gender_state_female.txt`, `gender_state_male.txt`, `age_gender.txt`, `underage_traps.txt` (`generate_all_gender_files`)
+ 5. `build_wyd_txt.py`            -> `wyd.txt` (`build_wyd_file`)
+ 6. `build_status_txt.py`         -> `status_positive.txt`, `status_negative.txt`, `status_ask_back.txt` (`build_all_status_files`)
+ 7. `build_flirt_react_txt.py`    -> `compliments_flirt.txt`, `reactions_ack.txt` (`build_flirt_and_react_files`)
+ 8. `build_looking_for_txt.py`    -> `looking_for_ask.txt`, `looking_for_state.txt` (`build_looking_for_files`)
+ 9. `build_name_txt.py`           -> `name_ask.txt`, `name_tell.txt`, `names_female_catalog.txt`, `names_male_catalog.txt` (`build_name_files` — mines 9 HF Parquet datasets)
+10. `build_hobbies_txt.py`        -> `hobbies_ask.txt`, `hobbies_tell.txt` (`build_hobbies_files`)
+11. `build_rel_status_txt.py`     -> `rel_status_ask.txt`, `rel_status_tell.txt` (`build_rel_status_files`)
+12. `build_private_yesno_txt.py`  -> `private_social_ask.txt`, `yes_no_maybe.txt` (`build_private_yesno_files`)
+13. `build_pic_photo_txt.py`      -> `pic_photo_ask.txt`, `pic_photo_offer.txt` (`build_pic_photo_files`)
+14. `build_bot_check_txt.py`      -> `bot_check_is_bot.txt`, `bot_check_is_real.txt` (`build_bot_check_files`)
+15. `build_step15_pack_txt.py`    -> `s15_goodbye_gn.txt`, `s15_work_study.txt`, `s15_language.txt`, `s15_playful_ama.txt`, `s15_flirt_meet.txt`, `s15_thanks_sorry.txt`, `s15_ping_clarify.txt`, `s15_nsfw_rude.txt`, `s15_timezone.txt` (`build_step15_pack_files`)
+16. `build_step17_english_txt.py` -> `s17_fast_reply.txt`, `s17_reason_chat.txt`, `s17_trust_ok.txt`, `s17_doubt_tease.txt`, `s17_casual_bridge.txt`, `s17_ask_why.txt` (`build_step17_english_files`)
+================================================================================
