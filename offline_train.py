@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 # FILE: offline_train.py
-# PURPOSE: 100% Dynamic Rule 14+15 Unified Compiler:
-#          1) Auto-runs any build_*_txt.py whose .txt outputs are missing (ZERO manual build commands!)
-#          2) Auto-discovers ALL offline_spec_*.py modules & detects new/modified steps via SHA-256 fingerprint
-#          3) Trains UnifiedRoutingNet, enforces 100% Single-Turn & Multi-Turn Zero-Fault Gates, exports model_weights.npz
+# PURPOSE: 100% Vault-Driven Dynamic Rule 14+15 Unified Compiler (ZERO .txt existence checks!)
+#          - Tracks every build_*_txt.py SHA-256 inside model_weights.npz (`builder_manifest_u8`)
+#          - Safe to delete .txt files after training; auto-runs ONLY new/changed build_*_txt.py (or all if .npz missing)
+#          - Preserves previously compiled Entity LUT (4,059+ names & countries) even if old .txt files were deleted!
 
 import glob
 import hashlib
 import logging
 import os
-import re
 import runpy
 import sys
 import time
@@ -44,38 +43,38 @@ except ImportError:
     HAS_XLA = False
 
 BATCH_SIZE = 512
-_TXT_LIT_RE = re.compile(r'["\']([a-z0-9_]+\.txt)["\']')
-
-
-def auto_build_missing_datasets(rebuild_all=False):
-    """Auto-scans all build_*_txt.py scripts and runs ONLY those with missing .txt outputs (Rule 12 safe)."""
-    ran_any = False
-    for py_file in sorted(glob.glob("build_*_txt.py")):
-        with open(py_file, "r", encoding="utf-8", errors="ignore") as f:
-            src = f.read()
-        outs = {m for m in _TXT_LIT_RE.findall(src) if m not in ("negatives.txt", "age_country_staging.txt")}
-        if py_file == "build_greetings_txt.py":
-            outs.add("negatives.txt")
-        missing = [fn for fn in sorted(outs) if not os.path.exists(fn)]
-        if rebuild_all or missing:
-            tag = "REBUILD" if rebuild_all else f"MISSING {len(missing)} .txt"
-            print(f"[AUTO-BUILD] Running '{py_file}' ({tag})...", flush=True)
-            runpy.run_path(py_file, run_name="__main__")
-            ran_any = True
-    if not ran_any:
-        print("[AUTO-BUILD] All build_*_txt.py datasets already present on disk.", flush=True)
-    return ran_any
 
 
 def _compute_specs_digest():
     h = hashlib.sha256()
-    files = ["offline_encoder.py", "offline_fsm_compiler.py"] + sorted(glob.glob("offline_spec_*.py"))
-    for fn in files:
+    for fn in ["offline_encoder.py", "offline_fsm_compiler.py"] + sorted(glob.glob("offline_spec_*.py")):
         if os.path.exists(fn):
             h.update(fn.encode("ascii"))
             with open(fn, "rb") as f:
                 h.update(f.read())
     return np.frombuffer(h.digest(), dtype=np.uint8).copy()
+
+
+def _compute_builder_manifest():
+    manifest = {}
+    for py_file in sorted(glob.glob("build_*_txt.py")):
+        with open(py_file, "rb") as f:
+            manifest[py_file] = hashlib.sha256(f.read()).hexdigest()[:16]
+    return manifest
+
+
+def _encode_manifest_u8(manifest_dict):
+    raw = "\n".join(f"{k}:{v}" for k, v in sorted(manifest_dict.items())).encode("ascii")
+    return np.frombuffer(raw if raw else b"none", dtype=np.uint8).copy()
+
+
+def _decode_manifest_u8(arr_u8):
+    out = {}
+    for line in arr_u8.tobytes().decode("ascii", errors="ignore").splitlines():
+        if ":" in line:
+            k, v = line.split(":", 1)
+            out[k] = v
+    return out
 
 
 def _get_system_ram_gb():
@@ -144,26 +143,48 @@ def collect_samples(bundle):
 
 
 def run_unified_compiler(output_path="model_weights.npz", force=False, rebuild_data=False):
-    built_new_txt = auto_build_missing_datasets(rebuild_all=rebuild_data)
     specs_digest = _compute_specs_digest()
+    cur_manifest = _compute_builder_manifest()
     bundle = discover_and_compile_all_specs()
     num_leaves = bundle.num_leaves
 
-    if not force and not built_new_txt and os.path.exists(output_path):
+    vault_exists = os.path.exists(output_path)
+    prev_manifest, prev_ea, prev_eb, prev_bloom = {}, None, None, None
+    vault_ok = False
+    if vault_exists:
         with np.load(output_path, allow_pickle=False) as arc:
-            if (
-                "vm_version_u8" in arc.files and int(arc["vm_version_u8"][0]) >= 14
-                and "specs_digest_u8" in arc.files and np.array_equal(arc["specs_digest_u8"], specs_digest)
-                and "leaf_to_class_u8" in arc.files and int(arc["leaf_to_class_u8"].shape[0]) == num_leaves
-            ):
-                print(f"[VAULT UP-TO-DATE] All {len(bundle.spec_names)} specs ({num_leaves} leaves) already locked in '{output_path}'! (pass --force to retrain)", flush=True)
-                return
+            if "vm_version_u8" in arc.files and int(arc["vm_version_u8"][0]) >= 14:
+                if "builder_manifest_u8" in arc.files:
+                    prev_manifest = _decode_manifest_u8(arc["builder_manifest_u8"])
+                if not rebuild_data and "entity_lut_a" in arc.files and "entity_lut_b" in arc.files and "super_bloom_u32" in arc.files:
+                    prev_ea, prev_eb, prev_bloom = arc["entity_lut_a"].copy(), arc["entity_lut_b"].copy(), arc["super_bloom_u32"].copy()
+                specs_same = "specs_digest_u8" in arc.files and np.array_equal(arc["specs_digest_u8"], specs_digest)
+                leaves_same = "leaf_to_class_u8" in arc.files and int(arc["leaf_to_class_u8"].shape[0]) == num_leaves
+                vault_ok = specs_same and leaves_same and (prev_manifest == cur_manifest)
+
+    if vault_ok and not force and not rebuild_data:
+        print(f"[VAULT UP-TO-DATE] All {len(bundle.spec_names)} specs ({num_leaves} leaves) & {len(cur_manifest)} builders locked in '{output_path}'! (Deleted .txt ignored)", flush=True)
+        return
+
+    # Run ONLY builders not yet recorded in model_weights.npz (or ALL builders if model_weights.npz missing / --rebuild-data)
+    to_run = [py for py, h in cur_manifest.items() if rebuild_data or (not vault_exists) or (prev_manifest.get(py) != h)]
+    for py_file in to_run:
+        tag = "NO VAULT" if not vault_exists else ("REBUILD" if rebuild_data else "NEW/UPDATED STEP")
+        print(f"[VAULT AUTO-BUILD] Running '{py_file}' ({tag})...", flush=True)
+        runpy.run_path(py_file, run_name="__main__")
 
     ram_arena = verify_hardware_and_lock_ram()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     char_lut, rej_lut, wp_mat = make_shared_luts()
     sample_map = collect_samples(bundle)
     super_bloom, entity_lut_a, entity_lut_b = build_entity_and_super_bloom(sample_map, wp_mat, bundle.leaf_step_map)
+
+    # Carry forward previously compiled Entity LUT & Super-Bloom so deleted .txt files NEVER lose names/countries!
+    if prev_ea is not None and prev_eb is not None and prev_bloom is not None:
+        mask_empty = entity_lut_a == np.uint8(0)
+        entity_lut_a = np.where(mask_empty, prev_ea, entity_lut_a).astype(np.uint8)
+        entity_lut_b = np.where(mask_empty, prev_eb, entity_lut_b).astype(np.uint8)
+        super_bloom = np.bitwise_or(super_bloom, prev_bloom, dtype=np.uint32)
 
     texts = list(sample_map.keys())
     n_raw = len(texts)
@@ -181,8 +202,7 @@ def run_unified_compiler(output_path="model_weights.npz", force=False, rebuild_d
     bg_t = torch.from_numpy(bg_mat[idx_arr]).to(device=device, dtype=torch.int32)
     st_t = torch.from_numpy(st_mat[idx_arr]).to(device=device, dtype=torch.float32)
     y_oh = torch.from_numpy(np.eye(num_leaves, dtype=np.float32)[np.array(y_list, dtype=np.int32)]).to(device=device, dtype=torch.float32)
-    sw_np = np.array(wt_list, dtype=np.float32)
-    text_to_row, n = {texts[i]: r for r, i in enumerate(keep_idx)}, len(keep_idx)
+    sw_np, text_to_row, n = np.array(wt_list, dtype=np.float32), {texts[i]: r for r, i in enumerate(keep_idx)}, len(keep_idx)
     print(f"[UNIFIED DATASET] Encoded {n} deduplicated rows across {num_leaves} leaves!", flush=True)
 
     w_m_t = (w_t != 0).to(torch.float32).unsqueeze(-1)
@@ -272,7 +292,7 @@ def run_unified_compiler(output_path="model_weights.npz", force=False, rebuild_d
         del ram_arena
         raise RuntimeError("[RULE 14 ABORT] Multi-Turn Gate failed!")
 
-    vault = {"vm_version_u8": np.array([14], dtype=np.uint8), "specs_digest_u8": specs_digest, "emb_word_q": q_ew, "emb_word_s": s_ew, "emb_bg_q": q_eb, "emb_bg_s": s_eb, "pos_emb_f32": pos_f32, "w_struct_q": q_ws, "w_struct_s": s_ws, "w1_q": q_w1, "w1_s": s_w1, "b1_f32": b1_f32, "w2_q": q_w2, "w2_s": s_w2, "b2_f32": b2_f32, "w_out_q": q_wo, "w_out_s": s_wo, "b_out_f32": bo_f32, "super_bloom_u32": super_bloom, "entity_lut_a": entity_lut_a, "entity_lut_b": entity_lut_b, "char_lut_i32": char_lut, "rej_lut_b": rej_lut, "w_poly_mat_i32": wp_mat}
+    vault = {"vm_version_u8": np.array([14], dtype=np.uint8), "specs_digest_u8": specs_digest, "builder_manifest_u8": _encode_manifest_u8(cur_manifest), "emb_word_q": q_ew, "emb_word_s": s_ew, "emb_bg_q": q_eb, "emb_bg_s": s_eb, "pos_emb_f32": pos_f32, "w_struct_q": q_ws, "w_struct_s": s_ws, "w1_q": q_w1, "w1_s": s_w1, "b1_f32": b1_f32, "w2_q": q_w2, "w2_s": s_w2, "b2_f32": b2_f32, "w_out_q": q_wo, "w_out_s": s_wo, "b_out_f32": bo_f32, "super_bloom_u32": super_bloom, "entity_lut_a": entity_lut_a, "entity_lut_b": entity_lut_b, "char_lut_i32": char_lut, "rej_lut_b": rej_lut, "w_poly_mat_i32": wp_mat}
     vault.update(bundle.fsm_tables)
     allowed_dts = (np.int8, np.uint8, np.uint16, np.int32, np.uint32, np.float32, np.bool_)
     for k, arr in vault.items():
@@ -283,8 +303,8 @@ def run_unified_compiler(output_path="model_weights.npz", force=False, rebuild_d
     np.savez(output_path, **vault)
     del ram_arena
     with open(output_path, "rb") as f_chk:
-        sha_hex = hashlib.sha256(f_chk.read()).hexdigest()[:16]
-    print(f"[RULE 2 & 12 AUDIT] Zero float64/int64 verified | Vault SHA-256: {sha_hex}...", flush=True)
+        sha256_hex = hashlib.sha256(f_chk.read()).hexdigest()[:16]
+    print(f"[RULE 2 & 12 AUDIT] Zero float64/int64 verified | Vault SHA-256: {sha256_hex}...", flush=True)
     print(f"[EXPORT COMPLETE — 100.0% ZERO FAULTS] Compiled {num_leaves} leaves into '{output_path}' ({os.path.getsize(output_path) / 1024.0:.2f} KB)!", flush=True)
 
 
