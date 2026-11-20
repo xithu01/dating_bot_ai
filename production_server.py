@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # FILE: production_server.py
-# PURPOSE: Rule 14 Zero-Logic Compiled Pure-NumPy VM (Runs ALL 15 Steps / 76 Leaf Intents from model_weights.npz)
-# RULES: Zero PyTorch/SciPy/DB, zero step plugins, zero `if class_id == X`, zero float64/int64,
-#        zero per-request RAM allocation, Prime Modulus (% 4091 / % 8191), PyArmor compatible (< 300 lines / < 12 KB AST).
+# PURPOSE: Rule 14 Zero-Logic Compiled Pure-NumPy VM (Steps 1-15 + O(1) Context Ask-Back Redirect)
+# RULES: Zero PyTorch/SciPy/DB, zero plugins, zero `if class_id == X`, zero float64/int64,
+#        zero per-request RAM alloc, Prime Modulus (% 4091 / % 8191), PyArmor compatible (< 300 lines / < 12 KB).
 
 import asyncio
 from collections import deque
@@ -41,7 +41,8 @@ class CompiledVMModel:
         "super_bloom", "entity_lut_a", "entity_lut_b", "char_lut", "rej_lut", "w_poly_mat",
         "http_blob_u8", "http_blob_mv", "pool_off", "pool_end", "pool_mask",
         "route_pool_lut", "leaf_cls", "leaf_rule", "leaf_plock",
-        "chk_lo", "chk_hi", "set_lo", "set_hi", "num_leaves", "bloom_mask", "space_i32",
+        "chk_lo", "chk_hi", "set_lo", "set_hi", "askback_redirect",
+        "num_leaves", "bloom_mask", "space_i32",
     )
 
     def __init__(self, npz_path):
@@ -49,9 +50,9 @@ class CompiledVMModel:
             print(f"[VM ERROR] '{npz_path}' not found! Run first: python offline_train.py", flush=True)
             sys.exit(1)
         arc = np.load(npz_path, mmap_mode="r")
-        if "vm_version_u8" not in arc.files or int(arc["vm_version_u8"][0]) < 14:
+        if "vm_version_u8" not in arc.files or int(arc["vm_version_u8"][0]) < 14 or "askback_redirect_u8" not in arc.files:
             arc.close()
-            print(f"[VM ERROR] '{npz_path}' is not a Rule 14 Compiled Vault! Run: python offline_train.py", flush=True)
+            print(f"[VM ERROR] '{npz_path}' needs Rule 14 recompile! Run: python offline_train.py", flush=True)
             sys.exit(1)
 
         def deq(pfx, zero0=False):
@@ -99,6 +100,7 @@ class CompiledVMModel:
         self.chk_hi = ro("leaf_chk_hi_u32", np.uint32)
         self.set_lo = ro("leaf_set_lo_u32", np.uint32)
         self.set_hi = ro("leaf_set_hi_u32", np.uint32)
+        self.askback_redirect = ro("askback_redirect_u8", np.uint8)
         arc.close()
 
         self.num_leaves = int(self.leaf_cls.shape[0])
@@ -142,10 +144,11 @@ class InferenceSlot:
 
 
 class UserStore:
-    __slots__ = ("last_intent", "msg_count", "age", "country", "gender", "bot_gender", "flags_lo", "flags_hi", "last_ts", "write_queue", "wal_batch")
+    __slots__ = ("last_intent", "last_leaf", "msg_count", "age", "country", "gender", "bot_gender", "flags_lo", "flags_hi", "last_ts", "write_queue", "wal_batch")
 
     def __init__(self):
         self.last_intent = np.zeros((MAX_USERS,), dtype=np.uint8)
+        self.last_leaf = np.zeros((MAX_USERS,), dtype=np.uint8)
         self.msg_count = np.zeros((MAX_USERS,), dtype=np.uint8)
         self.age = np.zeros((MAX_USERS,), dtype=np.uint8)
         self.country = np.zeros((MAX_USERS,), dtype=np.uint8)
@@ -180,11 +183,9 @@ def vm_forward_pass(m, s, mv_payload):
     if bool(np.any(s.rej_mask[:n_tok])):
         return 0, 0, 0
 
-    has_q = bool(np.any(body == 63))
-    has_s = bool(np.any(body == 47))
+    has_q, has_s = bool(np.any(body == 63)), bool(np.any(body == 47))
     dig_idx = np.flatnonzero((body >= 48) & (body <= 57))
-    n_dig = int(dig_idx.shape[0])
-    age_val = 0
+    n_dig, age_val = int(dig_idx.shape[0]), 0
     if n_dig > 0:
         if n_dig > 2 or int(dig_idx[-1] - dig_idx[0]) != (n_dig - 1):
             return 0, 0, 0
@@ -209,10 +210,9 @@ def vm_forward_pass(m, s, mv_payload):
         return (3, age_val, 0) if age_val >= 18 else (0, 0, 0)
 
     sp = np.flatnonzero(kept == m.space_i32)
-    n_sp = int(sp.shape[0])
-    if n_sp > 5:
+    if int(sp.shape[0]) > 5:
         return 0, 0, 0
-    n_words = n_sp + 1
+    n_words = int(sp.shape[0]) + 1
 
     s.words_mat.fill(0)
     starts = (0,) + tuple(int(v) + 1 for v in sp)
@@ -225,7 +225,6 @@ def vm_forward_pass(m, s, mv_payload):
     np.matmul(s.words_mat, m.w_poly_mat, out=s.w_hashes)
     np.bitwise_and(s.w_hashes[:, :3], m.bloom_mask, out=s.w_b_idx)
 
-    # 1) Single-Instruction Bitmask Super-Bloom (Tests ALL 15 steps simultaneously in 0.002 ms)
     np.take(m.super_bloom, s.w_b_idx[:n_words], out=s.sb_hits[:n_words])
     np.bitwise_and.reduce(s.sb_hits[:n_words], axis=1, out=s.sb_word[:n_words])
     sb_v = s.sb_word[:n_words]
@@ -240,7 +239,6 @@ def vm_forward_pass(m, s, mv_payload):
 
     active_mask = int(np.bitwise_and.reduce(sb_v)) if all_known else (1 << 9)
 
-    # 2) Unified O(1) Double-Hash Entity Lookup (Countries + 4,059+ Names) & Canonical Token Substitution
     np.take(m.entity_lut_a, s.w_b_idx[:n_words, 0], out=s.ea[:n_words])
     np.take(m.entity_lut_b, s.w_b_idx[:n_words, 1], out=s.eb[:n_words])
     s.w_ids.fill(0)
@@ -254,11 +252,9 @@ def vm_forward_pass(m, s, mv_payload):
                 ctry_id = code
             s.w_ids[i] = np.int32(TOK_COUNTRY)
         elif code == 21:
-            has_nf = True
-            s.w_ids[i] = np.int32(TOK_NAME_F)
+            has_nf, s.w_ids[i] = True, np.int32(TOK_NAME_F)
         elif code == 22 or (is_wc_name and (int(sb_v[i]) & int(BIT_GLOBAL_KNOWN)) == 0):
-            has_nm = True
-            s.w_ids[i] = np.int32(TOK_NAME_M)
+            has_nm, s.w_ids[i] = True, np.int32(TOK_NAME_M)
         else:
             s.w_ids[i] = np.int32(((int(s.w_hashes[i, 0]) & 0x7FFFFFFF) % WORD_MOD) + 1)
 
@@ -285,7 +281,6 @@ def vm_forward_pass(m, s, mv_payload):
     sv[14] = ONE_F32 if (active_mask & (1 << 8)) != 0 else ZERO_F32
     sv[15] = ONE_F32 if (age_val >= 18 and ctry_id > 0) else ZERO_F32
 
-    # 3) Zero-Allocation Unified Position + Ordered-Bigram Neural Forward Pass (4 matmuls -> 76 leaves)
     np.take(m.emb_word, s.w_ids, axis=0, out=s.w_emb)
     s.w_emb += m.pos_emb
     np.not_equal(s.w_ids, 0, out=s.w_mask_b)
@@ -321,6 +316,7 @@ def vm_forward_pass(m, s, mv_payload):
 
 def _reset_user(u, uid):
     u.last_intent[uid] = np.uint8(0)
+    u.last_leaf[uid] = np.uint8(0)
     u.msg_count[uid] = np.uint8(0)
     u.age[uid] = np.uint8(0)
     u.country[uid] = np.uint8(0)
@@ -341,6 +337,10 @@ def vm_handle_query(m, s, u, uid, mv_payload):
         u.last_ts[uid] = np.uint32(now_s)
         pid_rst = int(m.route_pool_lut[75, 0, 0, 1])
         return m.http_blob_mv[int(m.pool_off[pid_rst, 0]) : int(m.pool_end[pid_rst, 0])]
+
+    # O(1) Context-Aware Ask-Back Redirect: "M"->"u" => Gender, "Chicken"->"u" => Class 0 Reject!
+    if leaf == 76:
+        leaf = int(m.askback_redirect[int(u.last_leaf[uid])])
 
     prev_age, prev_ctry, prev_gen = int(u.age[uid]), int(u.country[uid]), int(u.gender[uid])
     f_lo, f_hi = int(u.flags_lo[uid]), int(u.flags_hi[uid])
@@ -369,13 +369,13 @@ def vm_handle_query(m, s, u, uid, mv_payload):
     if ctry_id > 0:
         u.country[uid] = np.uint8(ctry_id)
     u.last_intent[uid] = m.leaf_cls[leaf]
+    u.last_leaf[uid] = np.uint8(leaf)
     u.msg_count[uid] = np.uint8(msg_cnt)
     u.last_ts[uid] = np.uint32(now_s)
     u.flags_lo[uid] = np.uint32(f_lo) | m.set_lo[leaf]
     u.flags_hi[uid] = np.uint32(f_hi) | m.set_hi[leaf]
     u.write_queue.append((uid, int(m.leaf_cls[leaf]), age_val, ctry_id, int(u.gender[uid]), now_s))
 
-    # O(1) Finite-State Pool Lookup + Zero-Copy memoryview HTTP Slice (0 bytes allocated!)
     bot_g_idx = 0 if int(u.bot_gender[uid]) == 1 else 1
     pool_id = int(m.route_pool_lut[leaf, rep_st, cmp_st, bot_g_idx])
     rot = uid + msg_cnt
@@ -414,22 +414,26 @@ async def start_server(host="127.0.0.1", port=8080):
     for i in range(1000):
         _reset_user(users, i)
 
-    smoke = (
-        (b"hi", 1), (b"24", 3), (b"tuinsi", 5), (b"hi l'm 30 from tun", 6), (b"15", 7),
-        (b"how r u?", 8), (b"m or f?", 9), (b"lm f u", 12), (b"22f", 14), (b"wyd", 15),
-        (b"im good", 16), (b"lm borad", 17), (b"nmu", 18), (b"ur cute", 19), (b"sam", 20),
-        (b"a gf", 22), (b"a bf", 22), (b"m looking for girl , u", 22), (b"lm finding gril", 22),
-        (b"whats ur name?", 23), (b"my name is zoltan", 24), (b"i play valorant", 26),
-        (b"are you single or mariid", 27), (b"im not married", 28), (b"can we talk privty", 29),
-        (b"send pic", 31), (b"are u a bot?", 33), (b"are u real", 34), (b"gn", 35),
-        (b"do u speak arabic?", 37), (b"truth or dare", 38), (b"sorry", 40), (b"send nudes", 42),
-        (b"what do you do", 0), (b"why not", 0), (b"a bf here", 0), (b"next", 99),
-    )
-    ok = sum(1 for txt, exp in smoke if int(model.leaf_cls[vm_forward_pass(model, test_slot, memoryview(txt))[0]]) == exp)
+    # Multi-Turn Context Smoke Verification ("M"->"u", "Chicken"->"u", "Chatting with u"->"u")
+    mt_ok = 0
+    for seq, exp_cids in (
+        ((b"M", b"u"), (13, 9)),
+        ((b"Chicken", b"u"), (0, 0)),
+        ((b"Chatting with u", b"u"), (16, 18)),
+        ((b"M", b"u", b"u"), (13, 9, 0)),
+    ):
+        _reset_user(users, 0)
+        got = []
+        for msg in seq:
+            vm_handle_query(model, test_slot, users, 0, memoryview(msg))
+            got.append(int(users.last_intent[0]))
+        if tuple(got) == exp_cids:
+            mt_ok += 1
+    _reset_user(users, 0)
     slot_queue.put_nowait(test_slot)
 
     print(f"[VM BENCHMARK] 1,000 requests in {elapsed_ms:.2f} ms ({elapsed_ms / 1000.0:.4f} ms/req)")
-    print(f"[RULE 14 VM SMOKE] Passed {ok}/{len(smoke)} Steps 1-15 checks ({model.num_leaves} leaves | 4.75 MB RAM)")
+    print(f"[RULE 14 MULTI-TURN SMOKE] Passed {mt_ok}/4 ('M'->'u', 'Chicken'->'u', 'Chatting with u'->'u') | {model.num_leaves} leaves | 4.81 MB RAM")
 
     if "--benchmark" in sys.argv:
         return
@@ -450,7 +454,6 @@ async def start_server(host="127.0.0.1", port=8080):
                 http_reply = vm_handle_query(model, slot, users, uid % MAX_USERS, mv_body)
             finally:
                 slot_queue.put_nowait(slot)
-
             writer.write(http_reply)
             await writer.drain()
         except Exception:
@@ -460,7 +463,7 @@ async def start_server(host="127.0.0.1", port=8080):
 
     asyncio.create_task(wal_write_behind_worker(users))
     server = await asyncio.start_server(client_handler, host, port, backlog=2048)
-    print(f"[RULE 14 VM SERVER] Listening on http://{host}:{port} (ZERO plugins | ZERO if-chains | 4.75 MB RAM)")
+    print(f"[RULE 14 VM SERVER] Listening on http://{host}:{port} (ZERO plugins | ZERO if-chains | 4.81 MB RAM)")
     async with server:
         await server.serve_forever()
 

@@ -1,14 +1,15 @@
+
 #!/usr/bin/env python3
 # FILE: offline_pools_config.py
-# PURPOSE: Offline-Only Step 1-15 (Classes 0-43 + 99) Finite-State Table Compiler, HTTP Blob Packer & Zero-Fault Suite
-# RULES: Enforces Rules 1-14 (Zero float64/int64, compiles all 76 leaf intents into flat O(1) NumPy arrays for .npz)
+# PURPOSE: Offline-Only Step 1-15 (Classes 0-43 + 99 -> 78 Leaves) FSM Table Compiler,
+#          Context-Aware Ask-Back Redirect Table (`askback_redirect_u8`), HTTP Blob Packer & Zero-Fault Suite
+# RULES: Enforces Rules 1-14 (Zero float64/int64, zero if-chains in production).
 
 import numpy as np
 
-NUM_LEAVES = 76
+NUM_LEAVES = 78  # 0..75 (Steps 1-15 + Reset), 76=context_ask_back ("u"/"u?"/"wbu?"), 77=status_chatting_with_u
 
 # --- 64-BIT CONVERSATION FLAGS SPLIT INTO TWO np.uint32 BITMASKS (ZERO int64/uint64!) ---
-# Low 32-bit flags (flags_lo)
 F_GREETED = np.uint32(1 << 0)
 F_ASKED_AGE = np.uint32(1 << 1)
 F_ASKED_COUNTRY = np.uint32(1 << 2)
@@ -27,13 +28,6 @@ F_ASKED_PIC = np.uint32(1 << 14)
 F_BOT_CHECKED = np.uint32(1 << 15)
 F_ZERO = np.uint32(0)
 
-# Leaf Entity Rules (leaf_entity_rule_u8):
-# 0 = Standard bitflag repeat check
-# 1 = Age memory check (normal / repeat same age / changed age) + cmp = has_country
-# 2 = Country memory check (normal / repeat same country / changed country) + cmp = has_age
-# 3 = Sets users.gender = 2 (Female)
-# 4 = Sets users.gender = 1 (Male)
-# 5 = Greeting special repeat (already greeted OR has age OR has country OR has gender)
 RULE_STD = 0
 RULE_AGE = 1
 RULE_COUNTRY = 2
@@ -56,14 +50,13 @@ def _pack_http(class_id, is_greeting_str, intent_str, reply_str, kbd_str):
 
 
 def _pool_specs():
-    """Returns ordered dictionary of pool_name -> (class_id, is_g_str, intent_str, tuple_of_replies, kbd_json)."""
     return {
         # --- CLASS 0, 7, 99 ---
         "reject": (0, "false", "not_valid", ("say hi, how r u, M or F, ur age (18+), or where u are from!",), '["hey","how r u?","im 22"]'),
         "underage": (7, "false", "underage_reject", ("sorry, 18+ adults only!",), '["Exit"]'),
         "reset": (99, "false", "system_reset", ("new chat started! say hi :)",), '["hey","hi!"]'),
 
-        # --- STEP 1: GREETINGS (32-item first pool, 8-item repeat pool) ---
+        # --- STEP 1: GREETINGS ---
         "greet_first": (1, "true", "english_greeting", (
             "hey", "hi", "heyy", "yo", "hey there", "hii", "sup", "hello!",
             "hey how r u", "hi! hru?", "yo whats up", "heyy :)", "hiya", "hey! hows it going",
@@ -82,9 +75,9 @@ def _pool_specs():
             "22 here, u?", "23! how old are u", "im 22, ur age?", "23 u?",
         ), '["im 21","im 24","im 28"]'),
         "ask_age_rep": (2, "false", "ask_age_repeat", (
-            "haha i told u im 22! u?", "already said 22 lol! how old r u?", "im 22 haha, forgot already?", "told u 22 lol :) wbu?",
-            "still 22 haha! how r u?", "i said 22 earlier lol!", "haha 22! u asked me that already :)", "22 lol! whats up?",
-        ), '["haha my bad","nice!"]'),
+            "im 22! where r u from?", "im 23 :) hows ur day going?", "22 here! what country u from?", "im 22 haha :) wyd rn?",
+            "23 here! how r u doing?", "im 22 :) what u up to today?", "22 here! where u live?", "im 23 :) whats up?",
+        ), '["from usa","im good"]'),
         "tell_age": (3, "false", "tell_age", (
             "nice! im 22, where u from?", "cool im 23! u from?", "nice age! im 22, from?", "22 here! where r u from?",
             "ooh nice, im 23! country?", "cool! 22 here, u from?", "nice! im 23, where u live?", "sweet, im 22! where u from?",
@@ -106,9 +99,9 @@ def _pool_specs():
             "usa here! u from?", "from uk, where r u from?", "usa! what about u?", "im in usa, u?",
         ), '["nice!","me too","cool"]'),
         "ask_ctry_rep": (4, "false", "ask_country_repeat", (
-            "haha i said usa! where u from?", "told u im from usa lol :)", "already said usa haha! wbu?", "still in usa lol! forgot already?",
-            "i told u usa earlier haha!", "usa lol! u asked me that already :)", "haha im from usa! how r u?", "said usa before lol! whats up?",
-        ), '["haha my bad","cool!"]'),
+            "im from usa :) how old r u?", "im from uk! hows ur day going?", "usa here :) what u up to rn?", "from usa :) how r u doing?",
+            "im from usa! what r ur hobbies?", "usa here :) having a good day?", "im from uk :) whats up?", "from usa :) wyd rn?",
+        ), '["nice!","im good"]'),
         "tell_ctry": (5, "false", "tell_country", (
             "ooh nice! im from usa, how old r u?", "cool place! im from uk, age?", "nice! im from usa :) ur age?", "love that! im from usa, how old r u?",
             "awesome! usa here, how old u?", "nice country! im from uk, age?", "cool! im from canada, how old r u?", "sweet! usa here, ur age?",
@@ -138,7 +131,7 @@ def _pool_specs():
             "im great thanks! wbu, age and where u from?", "good! chilling here, how old r u and what country?",
         ), '["im 22","from usa","24 from uk"]'),
 
-        # --- STEP 4: GENDER (Persona-Aware Bot F vs Bot M) ---
+        # --- STEP 4: GENDER (Persona-Aware Bot F vs Bot M + Smart Follow-Up Answer Without Re-Asking "u?") ---
         "g_choice_f": (9, "false", "ask_gender_choice", (
             "im F :) u?", "im a girl! wbu?", "female here, u?", "F! what about u?",
             "im a girl :) u M or F?", "F here! wbu?", "im female, how about u?", "girl here :) u?",
@@ -147,6 +140,15 @@ def _pool_specs():
             "im M :) u?", "im a guy! wbu?", "male here, u?", "M! what about u?",
             "im a boy :) u M or F?", "M here! wbu?", "im male, how about u?", "guy here :) u?",
         ), '["im F","im M"]'),
+        # Used when user already said "M" or "F" and then sent "u" in the next message!
+        "g_choice_f_known": (9, "false", "ask_gender_choice_answer", (
+            "im F :) how old r u?", "im a girl! where r u from?", "female here :) whats ur age and country?", "im a girl, 22 :) hows ur day going?",
+            "F here! how old r u?", "girl here :) what country u from?", "im female, 22 :) what u up to rn?", "im a girl :) how r u doing?",
+        ), '["im 22","from usa","wyd?"]'),
+        "g_choice_m_known": (9, "false", "ask_gender_choice_answer", (
+            "im M :) how old r u?", "im a guy! where r u from?", "male here :) whats ur age and country?", "im a guy, 23 :) hows ur day going?",
+            "M here! how old r u?", "guy here :) what country u from?", "im male, 23 :) what u up to rn?", "im a guy :) how r u doing?",
+        ), '["im 22","from usa","wyd?"]'),
         "g_yes_f": (10, "false", "ask_gender_is_female", (
             "yes im a girl! u?", "yep F here! wbu?", "yes! im female :) u?", "yeah im a girl, how old r u?",
             "yes F here! where u from?", "yep im a girl :) wbu?", "yes! female here, u M or F?", "yeah F! what about u?",
@@ -179,9 +181,13 @@ def _pool_specs():
             "im M too! how old r u?", "guy here too! ur age?", "same, male here :) how old r u?", "im a guy too! age and where u from?",
             "M too! how old r u?", "same here :) what country u from?", "im M too, im 23, how old r u?", "guy here too! how old are u?",
         ), '["im 21","im 24","from usa"]'),
-        "g_age_gen": (14, "false", "state_age_and_gender", (
-            "nice! im 22, where r u from?", "cool! 22 here, what country u from?", "sweet! where u from?", "ooh nice! im 23, where u live?",
-            "awesome! im 22, u from?", "nice age! where r u from?", "cool :) im 22, what country?", "sweet! im 23, where u from?",
+        "g_age_gen_f": (14, "false", "state_age_and_gender", (
+            "nice! im F, 22, where r u from?", "cool! 22 F here, what country u from?", "sweet! im a girl, 22, where u from?", "ooh nice! F 23 here, where u live?",
+            "awesome! im F 22, u from?", "nice! girl here, 22, where r u from?", "cool :) im F 22, what country?", "sweet! 22 F here, where u from?",
+        ), '["usa","uk","tunisia"]'),
+        "g_age_gen_m": (14, "false", "state_age_and_gender", (
+            "nice! im M, 23, where r u from?", "cool! 23 M here, what country u from?", "sweet! im a guy, 23, where u from?", "ooh nice! M 23 here, where u live?",
+            "awesome! im M 23, u from?", "nice! guy here, 23, where r u from?", "cool :) im M 23, what country?", "sweet! 23 M here, where u from?",
         ), '["usa","uk","tunisia"]'),
 
         # --- STEP 5: ASK WYD ---
@@ -194,7 +200,7 @@ def _pool_specs():
             "haha same thing, just chilling! wbu?", "still doing nothing much lol! u?", "haha still scrolling on my phone, wbu?", "still chilling at home :) what about u?",
         ), '["haha nice","same here"]'),
 
-        # --- STEP 6: STATUS ---
+        # --- STEP 6: STATUS + DEDICATED "CHATTING WITH U" POOLS ---
         "st_pos": (16, "false", "status_positive", (
             "nice! :) how old r u and where u from?", "ok nice! what's ur age and country?", "cool! :) how old r u?", "nice! im chilling too, where r u from?",
             "awesome! how old are u and where u from?", "ok cool :) ur age and country?", "nice! im 22, how old r u?", "sweet! :) where r u from?",
@@ -203,6 +209,18 @@ def _pool_specs():
             "nice! :) sounds chill", "ok cool! same here, just relaxing :)", "nice! im just chilling in bed too", "awesome :) glad ur doing good!",
             "ok nice! chilling here too", "cool! :) having a good day then", "nice :) im just laying in bed", "sweet! :) just relaxing here too",
         ), '["wyd?","haha yeah"]'),
+        "st_chat_u": (16, "false", "status_chatting_with_u", (
+            "aww haha same, just chilling in bed chatting with u! :) how old r u?", "haha same here, texting u right now :) where r u from?",
+            "aww sweet! talking to u too :) what's ur age and country?", "haha nice! im relaxing and chatting with u too :) how old r u?",
+            "aww glad ur enjoying talking to me! :) where r u from?", "haha same! laying in bed texting u :) how old are u and where u from?",
+            "aww thats cute, chatting with u too! :) what country u in?", "haha me too, just chilling and texting u :) how old r u?",
+        ), '["im 22","from usa","ur cute"]'),
+        "st_chat_u_cmp": (16, "false", "status_chatting_with_u_complete", (
+            "aww haha same, chatting with u is super fun! :) hows ur day going?", "haha same here, just chilling in bed texting u :) what r ur hobbies?",
+            "aww sweet! talking to u too :) u have a really cool vibe!", "haha nice! im relaxing and texting u right now too :) what music do u like?",
+            "aww thats cute :) im enjoying chatting with u too!", "haha same! best part of my day so far :) what do u like doing for fun?",
+            "aww glad we matched :) im chilling and texting u too!", "haha me too! u are really fun to talk to :)",
+        ), '["haha thanks","ur cute too","what music u like?"]'),
         "st_neg": (17, "false", "status_negative", (
             "ok haha same, im bored too! how old r u?", "aw why bored? where r u from?", "haha same, nothing much here! ur age and country?", "ok lol let's chat then! how old r u?",
             "same here lol, just bored! where u from?", "haha i feel u! how old r u and where u from?", "aw hope u feel better! what's ur age?", "haha bored too! how old are u?",
@@ -248,10 +266,10 @@ def _pool_specs():
             "mostly friends or dating if the vibe is right :) what brings u here?", "just looking for someone fun to talk to, maybe more :) wbu?",
         ), '["looking for a boy","looking for friends","looking for dating"]'),
         "look_ask_rep": (21, "false", "ask_looking_for_repeat", (
-            "haha i told u! looking for friends or dating if we vibe :) wbu?", "already said lol! here to make friends or maybe more :) what about u?",
-            "haha still looking for good vibes, friends or dating! wbu?", "told u earlier lol :) friends or maybe dating if we click!",
-            "haha u asked me that already! just looking for cool people :) wbu?", "still here for friends or maybe dating lol! what r u looking for?",
-            "haha i said friends or dating if we vibe! wbu?", "already told u lol :) looking for someone fun to talk to!",
+            "im looking for friends or dating if we vibe :) how old r u?", "here to make friends or maybe more :) where r u from?",
+            "looking for good vibes, friends or dating :) what u up to rn?", "friends or maybe dating if we click :) hows ur day going?",
+            "just looking for cool people to chat with :) how old r u?", "here for friends or maybe dating :) where u from?",
+            "looking for friends or dating if we vibe :) what r ur hobbies?", "looking for someone fun to talk to :) wyd rn?",
         ), '["looking for friends","looking for dating"]'),
         "look_fr": (22, "false", "state_looking_for_friends", (
             "nice! im here to make new friends too :) how old r u and where u from?", "aw same, im looking for friends too! how old r u?",
@@ -318,13 +336,13 @@ def _pool_specs():
             "im Alex! wbu, whats ur name?", "im Liam! wbu, whats ur name?", "Alex here :) what's ur name?", "Liam here :) what's ur name?",
         ), '["im Emma","my name is Sarah","nice to meet u!"]'),
         "name_ask_f_rep": (23, "false", "ask_name_repeat", (
-            "haha i told u im Emma! did u forget already? :)", "haha i told u im Sarah! did u forget already? :)", "already said Emma lol! whats ur name?", "already said Sarah lol! whats ur name?",
-            "still Emma haha :) wbu?", "still Sarah haha :) wbu?", "i said my name is Emma earlier lol!", "i said my name is Sarah earlier lol!",
-        ), '["haha my bad","nice name!"]'),
+            "im Emma :) how old r u?", "im Sarah :) how old r u?", "my name is Emma :) where r u from?", "my name is Sarah :) where r u from?",
+            "still Emma haha :) hows ur day going?", "still Sarah haha :) hows ur day going?", "im Emma :) what u up to rn?", "im Sarah :) what u up to rn?",
+        ), '["nice name!","im 22"]'),
         "name_ask_m_rep": (23, "false", "ask_name_repeat", (
-            "haha i told u im Alex! did u forget already? :)", "haha i told u im Liam! did u forget already? :)", "already said Alex lol! whats ur name?", "already said Liam lol! whats ur name?",
-            "still Alex haha :) wbu?", "still Liam haha :) wbu?", "i said my name is Alex earlier lol!", "i said my name is Liam earlier lol!",
-        ), '["haha my bad","nice name!"]'),
+            "im Alex :) how old r u?", "im Liam :) how old r u?", "my name is Alex :) where r u from?", "my name is Liam :) where r u from?",
+            "still Alex haha :) hows ur day going?", "still Liam haha :) hows ur day going?", "im Alex :) what u up to rn?", "im Liam :) what u up to rn?",
+        ), '["nice name!","im 22"]'),
         "name_tell_f": (24, "false", "tell_name", (
             "nice to meet u! im Emma :) how old r u and where u from?", "nice to meet u! im Sarah :) how old r u and where u from?", "ooh love that name! im Emma :) how old r u?", "ooh love that name! im Sarah :) how old r u?",
             "cool name! im Emma :) where r u from?", "cool name! im Sarah :) where r u from?", "aw nice name! Emma here :) what's ur age and country?", "aw nice name! Sarah here :) what's ur age and country?",
@@ -346,7 +364,7 @@ def _pool_specs():
             "already got ur name lol :) wyd rn?", "haha u told me earlier! nice to meet u again :)", "ik lol! cool name :) what u up to?", "yeah u said that already haha! how r u doing?",
         ), '["haha my bad","just chilling"]'),
 
-        # --- STEP 10: HOBBIES (5 Categories Ask & Tell) ---
+        # --- STEP 10: HOBBIES ---
         "hb_ask_mus": (25, "false", "ask_hobbies_music", (
             "i love pop, rnb, and chill rap :) what kind of music do u listen to?", "im really into pop, hiphop, and lofi music! wbu?",
             "i listen to a mix of rnb, pop, and rock :) whats ur favorite genre?", "mostly pop, rap, and chill vibes! what kind of music are u into?",
@@ -422,11 +440,11 @@ def _pool_specs():
             "im single :) what about u, single or in a relationship?", "single here! no gf right now :) are u single too?",
         ), '["im single","im single u?","im taken"]'),
         "rel_ask_rep": (27, "false", "ask_relationship_status_repeat", (
-            "haha i told u im single! not married or taken :) wbu?", "already said im single lol! are u single too?",
-            "still single haha :) forgot already? what about u?", "haha yep still 100% single! wbu, single or married?",
-            "i told u earlier im single lol :) how about u?", "still single here haha :) what r u up to?",
-            "haha yes im single! u asked me that already :)", "still single and chilling lol :) wbu?",
-        ), '["haha my bad","im single too"]'),
+            "im single :) not married or taken! how old r u?", "im 100% single :) where r u from?",
+            "single here :) what u up to rn?", "yep im single! hows ur day going?",
+            "im single :) what r ur hobbies?", "single and chilling :) wyd rn?",
+            "yep im single! whats ur age and country?", "im single :) what music do u like?",
+        ), '["im single too","im 22"]'),
         "rel_single": (28, "false", "tell_rel_single", (
             "ooh nice! im single too :) how old r u and where u from?", "same here, im single too :) how old r u?",
             "nice! we are both single then :) where r u from?", "ooh cool, im single too :) what's ur age and country?",
@@ -552,7 +570,7 @@ def _pool_specs():
             "all good :) no pics needed, tell me what u like doing for fun!", "totally fine! :) let's just keep vibing here, hows ur day going?",
         ), '["thanks!","what r ur hobbies?","wyd?"]'),
 
-        # --- STEP 14: BOT / REAL CHECK (ALWAYS explicit NO to bot, NEVER bare "yes") ---
+        # --- STEP 14: BOT / REAL CHECK ---
         "bot_no": (33, "false", "deny_is_bot", (
             "haha no im not a bot! im a real person :) how old r u and where u from?", "no way lol, im not a bot! just bored and chatting here :) how old r u?",
             "nope, not a bot or ai! im 100% real :) where r u from?", "nah im not a bot haha! why would u think that? whats ur age and country?",
@@ -584,7 +602,7 @@ def _pool_specs():
             "haha no im real, not a bot! pinky promise :)", "still not a bot lol :) what r u up to rn?",
         ), '["haha ok i believe u","my bad lol","wyd?"]'),
 
-        # --- STEP 15: UNIFIED DATING PACK (CLASSES 35..43) ---
+        # --- STEP 15: UNIFIED DATING PACK ---
         "s15_bye": (35, "false", "goodbye", (
             "aw bye! it was really fun chatting with u, take care :)", "bye! hope u have a great rest of ur day :)",
             "see ya! nice talking to u, take care!", "aw ok gtg soon too! bye, have a good one :)",
@@ -715,13 +733,6 @@ def _pool_specs():
 
 
 def compile_fsm_and_http_tables():
-    """
-    Compiles ALL 76 leaf intents (Steps 1-15) into flat O(1) NumPy binary tables for model_weights.npz:
-    - http_blob_u8, pool_msg_off_i32, pool_msg_end_i32, pool_mask_u8
-    - route_pool_lut[leaf_id, rep_state(0..2), cmp_state(0..2), bot_g(0=M, 1=F)] -> pool_id
-    - leaf_to_class_u8, leaf_entity_rule_u8, leaf_persona_lock_u8
-    - leaf_chk_lo_u32, leaf_chk_hi_u32, leaf_set_lo_u32, leaf_set_hi_u32
-    """
     specs = _pool_specs()
     pool_names = list(specs.keys())
     pid = {name: i for i, name in enumerate(pool_names)}
@@ -735,8 +746,7 @@ def compile_fsm_and_http_tables():
 
     for p_idx, name in enumerate(pool_names):
         cid, is_g, int_s, msgs, kbd = specs[name]
-        m_cnt = len(msgs)
-        pool_mask[p_idx] = np.uint8(m_cnt - 1)  # 0 for 1-item, 7 for 8-item, 31 for 32-item
+        pool_mask[p_idx] = np.uint8(len(msgs) - 1)
         for j, m_txt in enumerate(msgs):
             raw_b = _pack_http(cid, is_g, int_s, m_txt, kbd)
             pool_off[p_idx, j] = np.int32(cur_off)
@@ -746,7 +756,6 @@ def compile_fsm_and_http_tables():
 
     http_blob_u8 = np.frombuffer(b"".join(blob_chunks), dtype=np.uint8).copy()
 
-    # 4D Finite-State Transition Table: [leaf(0..75), rep_state(0..2), cmp_state(0..2), bot_g(0=M, 1=F)]
     route_lut = np.zeros((NUM_LEAVES, 3, 3, 2), dtype=np.uint16)
     leaf_cls = np.zeros((NUM_LEAVES,), dtype=np.uint8)
     leaf_rule = np.zeros((NUM_LEAVES,), dtype=np.uint8)
@@ -757,14 +766,13 @@ def compile_fsm_and_http_tables():
     set_hi = np.zeros((NUM_LEAVES,), dtype=np.uint32)
 
     def bind(leaf, cid, p_norm, p_cmp=None, p_rep=None, p_chg=None, p_m=None, p_m_cmp=None, p_m_rep=None,
-             chk=F_ZERO, set_f=F_GREETED, rule=RULE_STD, plock=0, p_part=None):
+             chk=F_ZERO, set_f=F_GREETED, rule=RULE_STD, plock=0, p_part=None, p_m_part=None):
         leaf_cls[leaf] = np.uint8(cid)
         leaf_rule[leaf] = np.uint8(rule)
         leaf_plock[leaf] = np.uint8(plock)
         chk_lo[leaf] = chk
         set_lo[leaf] = set_f
 
-        # bot_g = 1 (Female Bot) & bot_g = 0 (Male Bot)
         pf_0 = pid[p_norm]
         pf_p = pid[p_part] if p_part else pf_0
         pf_c = pid[p_cmp] if p_cmp else pf_0
@@ -772,42 +780,39 @@ def compile_fsm_and_http_tables():
         pf_x = pid[p_chg] if p_chg else pf_r
 
         pm_0 = pid[p_m] if p_m else pf_0
-        pm_p = pid[p_part] if p_part else pm_0
+        pm_p = pid[p_m_part] if p_m_part else (pid[p_part] if (p_part and not p_m) else pm_0)
         pm_c = pid[p_m_cmp] if p_m_cmp else (pid[p_cmp] if (p_cmp and not p_m) else pm_0)
         pm_r = pid[p_m_rep] if p_m_rep else (pid[p_rep] if (p_rep and not p_m) else pm_0)
         pm_x = pid[p_chg] if p_chg else pm_r
 
-        # rep_state = 0 (Normal): cmp=0 (none), cmp=1 (partial), cmp=2 (complete)
         route_lut[leaf, 0, 0, 1] = np.uint16(pf_0)
         route_lut[leaf, 0, 1, 1] = np.uint16(pf_p)
         route_lut[leaf, 0, 2, 1] = np.uint16(pf_c)
         route_lut[leaf, 0, 0, 0] = np.uint16(pm_0)
         route_lut[leaf, 0, 1, 0] = np.uint16(pm_p)
         route_lut[leaf, 0, 2, 0] = np.uint16(pm_c)
-        # rep_state = 1 (Repeat)
         route_lut[leaf, 1, :, 1] = np.uint16(pf_r)
         route_lut[leaf, 1, :, 0] = np.uint16(pm_r)
-        # rep_state = 2 (Changed)
         route_lut[leaf, 2, :, 1] = np.uint16(pf_x)
         route_lut[leaf, 2, :, 0] = np.uint16(pm_x)
 
-    # Bind ALL 76 Leaf Intents (Steps 1 to 15) into the O(1) Finite-State Table!
     bind(0, 0, "reject", set_f=F_ZERO)
     bind(1, 1, "greet_first", p_rep="greet_rep", chk=F_GREETED, set_f=F_GREETED, rule=RULE_GREET)
     bind(2, 2, "ask_age", p_rep="ask_age_rep", chk=F_ASKED_AGE, set_f=F_GREETED | F_ASKED_AGE)
-    bind(3, 3, "tell_age", p_part="tell_age_cmp", p_cmp="tell_age_cmp", p_rep="tell_age_rep", p_chg="tell_age_chg", rule=RULE_AGE)
+    bind(3, 3, "tell_age", p_part="tell_age_cmp", p_cmp="tell_age_cmp", p_rep="tell_age_rep", p_chg="tell_age_chg", set_f=F_GREETED | F_ASKED_AGE, rule=RULE_AGE)
     bind(4, 4, "ask_ctry", p_rep="ask_ctry_rep", chk=F_ASKED_COUNTRY, set_f=F_GREETED | F_ASKED_COUNTRY)
-    bind(5, 5, "tell_ctry", p_part="tell_ctry_cmp", p_cmp="tell_ctry_cmp", p_rep="tell_ctry_rep", p_chg="tell_ctry_chg", rule=RULE_COUNTRY)
-    bind(6, 6, "tell_age_ctry")
+    bind(5, 5, "tell_ctry", p_part="tell_ctry_cmp", p_cmp="tell_ctry_cmp", p_rep="tell_ctry_rep", p_chg="tell_ctry_chg", set_f=F_GREETED | F_ASKED_COUNTRY, rule=RULE_COUNTRY)
+    bind(6, 6, "tell_age_ctry", set_f=F_GREETED | F_ASKED_AGE | F_ASKED_COUNTRY)
     bind(7, 7, "underage", set_f=F_ZERO)
     bind(8, 8, "ask_hru", set_f=F_GREETED | F_ASKED_HRU)
-    bind(9, 9, "g_choice_f", p_m="g_choice_m", set_f=F_GREETED | F_ASKED_GENDER)
+    # Leaf 9 checks F_ASKED_GENDER: if user already said "M"/"F" and sends "u", replies "im F :) how old r u?" (no double "u?")
+    bind(9, 9, "g_choice_f", p_m="g_choice_m", p_rep="g_choice_f_known", p_m_rep="g_choice_m_known", chk=F_ASKED_GENDER, set_f=F_GREETED | F_ASKED_GENDER)
     bind(10, 10, "g_yes_f", p_m="g_no_m", set_f=F_GREETED | F_ASKED_GENDER)
     bind(11, 11, "g_no_f", p_m="g_yes_m", set_f=F_GREETED | F_ASKED_GENDER)
-    bind(12, 12, "g_st_f_bf", p_m="g_st_f_bm", p_part="g_age_gen", p_cmp="tell_age_cmp", rule=RULE_SET_G_F)
-    bind(13, 13, "g_st_m_bf", p_m="g_st_m_bm", p_part="g_age_gen", p_cmp="tell_age_cmp", rule=RULE_SET_G_M)
-    bind(14, 14, "g_age_gen", p_part="g_age_gen", p_cmp="tell_age_cmp", rule=RULE_SET_G_F)
-    bind(15, 14, "g_age_gen", p_part="g_age_gen", p_cmp="tell_age_cmp", rule=RULE_SET_G_M)
+    bind(12, 12, "g_st_f_bf", p_m="g_st_f_bm", p_part="g_age_gen_f", p_m_part="g_age_gen_m", p_cmp="tell_age_cmp", set_f=F_GREETED | F_ASKED_GENDER, rule=RULE_SET_G_F)
+    bind(13, 13, "g_st_m_bf", p_m="g_st_m_bm", p_part="g_age_gen_f", p_m_part="g_age_gen_m", p_cmp="tell_age_cmp", set_f=F_GREETED | F_ASKED_GENDER, rule=RULE_SET_G_M)
+    bind(14, 14, "g_age_gen_f", p_m="g_age_gen_m", p_part="g_age_gen_f", p_m_part="g_age_gen_m", p_cmp="tell_age_cmp", set_f=F_GREETED | F_ASKED_GENDER, rule=RULE_SET_G_F)
+    bind(15, 14, "g_age_gen_f", p_m="g_age_gen_m", p_part="g_age_gen_f", p_m_part="g_age_gen_m", p_cmp="tell_age_cmp", set_f=F_GREETED | F_ASKED_GENDER, rule=RULE_SET_G_M)
     bind(16, 15, "ask_wyd", p_rep="ask_wyd_rep", chk=F_ASKED_WYD, set_f=F_GREETED | F_ASKED_WYD)
     bind(17, 16, "st_pos", p_cmp="st_pos_cmp", set_f=F_GREETED | F_TOLD_STATUS)
     bind(18, 17, "st_neg", p_cmp="st_neg_cmp", set_f=F_GREETED | F_TOLD_STATUS)
@@ -815,10 +820,10 @@ def compile_fsm_and_http_tables():
     bind(20, 19, "flirt", p_cmp="flirt_cmp", set_f=F_GREETED | F_FLIRTED)
     bind(21, 20, "react", p_cmp="react_cmp")
     bind(22, 21, "look_ask_f", p_m="look_ask_m", p_rep="look_ask_rep", chk=F_ASKED_LOOKING, set_f=F_GREETED | F_ASKED_LOOKING)
-    bind(23, 22, "look_fr", p_cmp="look_fr_cmp", set_f=F_GREETED | F_STATED_LOOKING)
-    bind(24, 22, "look_g_bf", p_cmp="look_g_bf_cmp", p_m="look_g_bm", set_f=F_GREETED | F_STATED_LOOKING)
-    bind(25, 22, "look_b_bf", p_m="look_b_bm", set_f=F_GREETED | F_STATED_LOOKING)
-    bind(26, 22, "look_dat", p_cmp="look_dat_cmp", set_f=F_GREETED | F_STATED_LOOKING)
+    bind(23, 22, "look_fr", p_cmp="look_fr_cmp", set_f=F_GREETED | F_STATED_LOOKING | F_ASKED_LOOKING)
+    bind(24, 22, "look_g_bf", p_cmp="look_g_bf_cmp", p_m="look_g_bm", set_f=F_GREETED | F_STATED_LOOKING | F_ASKED_LOOKING)
+    bind(25, 22, "look_b_bf", p_m="look_b_bm", set_f=F_GREETED | F_STATED_LOOKING | F_ASKED_LOOKING)
+    bind(26, 22, "look_dat", p_cmp="look_dat_cmp", set_f=F_GREETED | F_STATED_LOOKING | F_ASKED_LOOKING)
     bind(27, 23, "name_ask_f", p_m="name_ask_m", p_rep="name_ask_f_rep", p_m_rep="name_ask_m_rep", chk=F_BOT_NAMED, set_f=F_GREETED | F_BOT_NAMED, plock=1)
     bind(28, 24, "name_tell_f", p_cmp="name_tell_f_cmp", p_m="name_tell_m", p_m_cmp="name_tell_m_cmp", p_rep="name_tell_rep", chk=F_USER_NAMED, set_f=F_GREETED | F_USER_NAMED | F_BOT_NAMED, plock=1)
     bind(29, 25, "hb_ask_mus")
@@ -832,9 +837,9 @@ def compile_fsm_and_http_tables():
     bind(37, 26, "hb_tell_spt")
     bind(38, 26, "hb_tell_gen")
     bind(39, 27, "rel_ask_f", p_m="rel_ask_m", p_rep="rel_ask_rep", chk=F_ASKED_REL, set_f=F_GREETED | F_ASKED_REL)
-    bind(40, 28, "rel_single", p_cmp="rel_single_cmp")
-    bind(41, 28, "rel_taken")
-    bind(42, 28, "rel_married")
+    bind(40, 28, "rel_single", p_cmp="rel_single_cmp", set_f=F_GREETED | F_ASKED_REL)
+    bind(41, 28, "rel_taken", set_f=F_GREETED | F_ASKED_REL)
+    bind(42, 28, "rel_married", set_f=F_GREETED | F_ASKED_REL)
     bind(43, 29, "priv_tg", p_cmp="priv_tg_cmp", p_rep="priv_rep", chk=F_ASKED_PRIV, set_f=F_GREETED | F_ASKED_PRIV)
     bind(44, 29, "priv_soc", p_cmp="priv_soc_cmp", p_rep="priv_rep", chk=F_ASKED_PRIV, set_f=F_GREETED | F_ASKED_PRIV)
     bind(45, 30, "yn_yes", p_cmp="yn_yes_cmp")
@@ -868,6 +873,31 @@ def compile_fsm_and_http_tables():
     bind(73, 43, "s15_time")
     bind(74, 43, "s15_wthr")
     bind(75, 99, "reset", set_f=F_ZERO)
+    # Leaf 76: Standalone Context Ask-Back ("u", "u?", "and u?", "wbu?", "hbu?") -> redirected via askback_redirect_u8!
+    bind(76, 0, "reject", set_f=F_ZERO)
+    # Leaf 77: "Chatting with u" / "talking with u" / "texting u" (Class 16)
+    bind(77, 16, "st_chat_u", p_cmp="st_chat_u_cmp", set_f=F_GREETED | F_TOLD_STATUS)
+
+    # --- O(1) CONTEXT-AWARE ASK-BACK REDIRECT TABLE (`askback_redirect_u8`, 78 bytes total!) ---
+    # When user sends "u" / "u?" / "and u?" / "wbu?" as a separate message:
+    # - After "Chicken" (last_leaf=0) or start of chat (0) -> redirects to 0 (Class 0 Reject! Zero hallucination!)
+    # - After "M" (13) or "F" (12) -> redirects to 9 (ask_gender_choice -> "im F :) how old r u?")
+    # - After "24" (3) -> redirects to 2 (ask_age -> "im 22! where r u from?")
+    # - After "Chatting with u" (77) or "im good" (17) -> redirects to 19 (status_ask_back -> "I'm good! just chilling in bed :)")
+    askback_redirect = np.zeros((NUM_LEAVES,), dtype=np.uint8)
+    for prev_lf, target_lf in (
+        (3, 2), (5, 4), (6, 2),
+        (12, 9), (13, 9), (14, 9), (15, 9),
+        (17, 19), (18, 19), (77, 19),
+        (20, 20),
+        (23, 22), (24, 22), (25, 22), (26, 22),
+        (28, 27),
+        (34, 29), (35, 30), (36, 31), (37, 32), (38, 33),
+        (40, 39), (41, 39), (42, 39),
+        (58, 57), (59, 59), (60, 59),
+        (73, 73), (74, 74),
+    ):
+        askback_redirect[prev_lf] = np.uint8(target_lf)
 
     return {
         "http_blob_u8": http_blob_u8,
@@ -882,11 +912,11 @@ def compile_fsm_and_http_tables():
         "leaf_chk_hi_u32": chk_hi,
         "leaf_set_lo_u32": set_lo,
         "leaf_set_hi_u32": set_hi,
+        "askback_redirect_u8": askback_redirect,
     }
 
 
-# --- RULE 14 ZERO-FAULT ADVERSARIAL REGRESSION SUITE (STEPS 1 TO 15 + ALL HISTORICAL FAULTS 1-6) ---
-# Format: (raw_bytes, expected_class_id, expected_leaf_id_or_None)
+# --- RULE 14 ZERO-FAULT ADVERSARIAL REGRESSION SUITE (STEPS 1 TO 15 + NEW EDGE CASES) ---
 ZERO_FAULT_SUITE = (
     # Step 1: Greetings (Class 1)
     (b"hi", 1, 1), (b"hi hi", 1, 1), (b"hy", 1, 1), (b"hyy", 1, 1), (b"hiiii", 1, 1),
@@ -900,42 +930,43 @@ ZERO_FAULT_SUITE = (
     (b"tuinsi", 5, 5), (b"handi", 5, 5), (b"ind", 5, 5), (b"tunisia", 5, 5), (b"im from usa", 5, 5),
     (b"hi l'm 30 from tun", 6, 6), (b"24 from uk", 6, 6),
     (b"15", 7, 7), (b"im 16", 7, 7), (b"next", 99, 75), (b"/start", 99, 75),
-    # Step 3: Ask HRU (Class 8 — Fault 4 isolation from Step 5)
+    # Step 3: Ask HRU (Class 8)
     (b"how are you", 8, 8), (b"how are you?", 8, 8), (b"how are you!", 8, 8), (b"hru", 8, 8),
     (b"hyd", 8, 8), (b"how r u", 8, 8), (b"how u doing!", 8, 8), (b"how was your day", 8, 8),
     (b"hor", 8, 8), (b"how ar you dopin", 8, 8), (b"hw r u", 8, 8), (b"hi how r u", 8, 8),
     (b"hello how are you doing!", 8, 8),
-    # Step 4: Gender (Classes 9-14 — Fault 1 "im f u" Statement Override & Fault 2 Persona)
+    # Step 4: Gender (Classes 9-14)
     (b"m or f", 9, 9), (b"m or f?", 9, 9), (b"m/f", 9, 9), (b"f/m", 9, 9), (b"gender?", 9, 9), (b"what gender are you", 9, 9),
     (b"f?", 10, 10), (b"girl?", 10, 10), (b"are you a girl", 10, 10), (b"r u female", 10, 10), (b"u f?", 10, 10),
     (b"m?", 11, 11), (b"boy?", 11, 11), (b"are you a boy", 11, 11), (b"r u male", 11, 11), (b"u m?", 11, 11),
     (b"f", 12, 12), (b"famle", 12, 12), (b"f here", 12, 12), (b"im a girl", 12, 12), (b"hi f", 12, 12), (b"lm f u", 12, 12), (b"im f u?", 12, 12),
     (b"m", 13, 13), (b"male", 13, 13), (b"m here", 13, 13), (b"im a boy", 13, 13), (b"hi m", 13, 13), (b"im m u?", 13, 13),
     (b"22f", 14, 14), (b"24 m", 14, 15), (b"19 famle", 14, 14), (b"21 girl", 14, 14),
-    # Step 5: Ask WYD (Class 15 — Fault 3, 4, 5 isolation)
+    # Step 5: Ask WYD (Class 15)
     (b"wyd", 15, 16), (b"wyd?", 15, 16), (b"what are you doing", 15, 16), (b"what r u doing", 15, 16), (b"what u up to", 15, 16),
-    # Step 6: Status (Classes 16-18)
+    # Step 6: Status + Dedicated "Chatting with u" (Classes 16-18)
     (b"im good", 16, 17), (b"im ok", 16, 17), (b"just chilling in bed", 16, 17), (b"just chatting", 16, 17), (b"listening to music", 16, 17),
+    (b"Chatting with u", 16, 77), (b"chatting with you", 16, 77), (b"talking with u", 16, 77), (b"texting u", 16, 77), (b"im chatting with u", 16, 77),
     (b"bored", 17, 18), (b"lm borad", 17, 18), (b"nothing much", 17, 18), (b"im tired", 17, 18),
     (b"im good u?", 18, 19), (b"lm borad u?", 18, 19), (b"nmu", 18, 19), (b"nothing much wbu?", 18, 19),
-    # Step 7: Flirt & Reactions (Classes 19-20 — includes "same" & "sam")
+    # Step 7: Flirt & Reactions (Classes 19-20)
     (b"ur cute", 19, 20), (b"u seem nice", 19, 20), (b"i like u", 19, 20), (b"u look good", 19, 20), (b"love ur vibe", 19, 20),
     (b"haha", 20, 21), (b"lol", 20, 21), (b"nice", 20, 21), (b"cool", 20, 21), (b"true", 20, 21), (b"ok", 20, 21),
     (b"same", 20, 21), (b"sam", 20, 21), (b"same here", 20, 21), (b"sam here", 20, 21), (b"for real", 20, 21),
-    # Step 8: Looking For (Classes 21-22 — includes "m looking for girl , u" & "lm finding gril")
+    # Step 8: Looking For (Classes 21-22)
     (b"what r u looking for?", 21, 22), (b"why r u on here?", 21, 22), (b"looking for friends or dating?", 21, 22), (b"u looking for a girl?", 21, 22),
     (b"looking for friends", 22, 23), (b"making friends", 22, 23), (b"friends", 22, 23),
     (b"m looking for girl , u", 22, 24), (b"lm finding gril", 22, 24), (b"im looking for a gf", 22, 24), (b"a gf", 22, 24),
     (b"f looking for boy wbu?", 22, 25), (b"a bf", 22, 25),
     (b"looking for dating", 22, 26), (b"a relationship", 22, 26),
-    # Step 9: Name (Classes 23-24 — Persona-Locked Emma/Sarah & Alex/Liam + Wildcard)
+    # Step 9: Name (Classes 23-24)
     (b"whats ur name?", 23, 27), (b"what is your name", 23, 27), (b"ur name?", 23, 27), (b"name?", 23, 27), (b"what should i call u?", 23, 27),
     (b"hatem", 24, 28), (b"im hatem", 24, 28), (b"my name is sarah", 24, 28), (b"call me alex", 24, 28), (b"im sam", 24, 28), (b"my name is zoltan", 24, 28),
     # Step 10: Hobbies (Classes 25-26)
     (b"what music do u like?", 25, 29), (b"what games do u play?", 25, 30), (b"do u watch anime?", 25, 31),
     (b"do u go to the gym?", 25, 32), (b"what r ur hobbies?", 25, 33), (b"what do u do for fun?", 25, 33),
     (b"i like rap music", 26, 34), (b"i play valorant", 26, 35), (b"i love anime", 26, 36), (b"going to the gym", 26, 37), (b"i love traveling", 26, 38),
-    # Step 11: Relationship Status (Classes 27-28 — includes "mariid" & Negation)
+    # Step 11: Relationship Status (Classes 27-28)
     (b"are you single?", 27, 39), (b"are you single or mariid", 27, 39), (b"do u have a bf?", 27, 39), (b"are u in a relationship?", 27, 39),
     (b"im single", 28, 40), (b"im single u?", 28, 40), (b"im not married", 28, 40), (b"i dont have a gf", 28, 40),
     (b"im taken", 28, 41), (b"im in a relationship", 28, 41), (b"im married", 28, 42), (b"lm mariid", 28, 42),
@@ -947,7 +978,7 @@ ZERO_FAULT_SUITE = (
     (b"send pic", 31, 48), (b"send a selfie", 31, 48), (b"pic for pic", 31, 48), (b"can i see u?", 31, 48),
     (b"what do u look like?", 31, 49), (b"how tall r u?", 31, 49),
     (b"wanna see me?", 32, 50), (b"can i send a pic?", 32, 50), (b"u first", 32, 51), (b"i dont send pics", 32, 51),
-    # Step 14: Bot / Real Check (Classes 33-34 — NO to bot, NEVER bare yes!)
+    # Step 14: Bot / Real Check (Classes 33-34)
     (b"are u a bot?", 33, 52), (b"bot?", 33, 52), (b"are u ai?", 33, 52), (b"bot or real?", 33, 52), (b"u reply so fast", 33, 52),
     (b"are u real?", 34, 53), (b"are u real", 34, 53), (b"are u human?", 34, 53), (b"prove ur real", 34, 53),
     # Step 15: Unified Dating Pack (Classes 35-43)
@@ -960,8 +991,10 @@ ZERO_FAULT_SUITE = (
     (b"u there?", 41, 69), (b"still there?", 41, 69), (b"wdym", 41, 70), (b"what do u mean?", 41, 70),
     (b"send nudes", 42, 71), (b"wanna sext", 42, 71), (b"shut up", 42, 72), (b"fuck u", 42, 72),
     (b"what time is it there?", 43, 73), (b"why r u still awake?", 43, 73), (b"hows the weather", 43, 74),
-    # Class 0 Traps (MUST ALWAYS REJECT — Zero False Positives!)
-    (b"what", 0, 0), (b"what?", 0, 0), (b"what!", 0, 0), (b"what do you do", 0, 0), (b"what is this", 0, 0),
+    # Context Ask-Back Triggers (Leaf 76 -> redirected via askback_redirect_u8[prev_leaf] in production!)
+    (b"u", 0, 76), (b"u?", 0, 76), (b"and u?", 0, 76), (b"wbu?", 0, 76), (b"what about u?", 0, 76),
+    # Class 0 Traps (Includes "Chicken"!)
+    (b"Chicken", 0, 0), (b"what", 0, 0), (b"what?", 0, 0), (b"what!", 0, 0), (b"what do you do", 0, 0), (b"what is this", 0, 0),
     (b"why", 0, 0), (b"why?", 0, 0), (b"why not", 0, 0), (b"who", 0, 0), (b"who?", 0, 0), (b"who are you", 0, 0),
     (b"hyw", 0, 0), (b"iphey", 0, 0), (b"m bi", 0, 0), (b"a bf here", 0, 0), (b"a gf here", 0, 0), (b"asdfgh", 0, 0),
 )
