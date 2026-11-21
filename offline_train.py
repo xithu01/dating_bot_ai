@@ -2,8 +2,8 @@
 # FILE: offline_train.py
 # PURPOSE: 100% Vault-Driven Dynamic Rule 14+15 Unified Compiler (ZERO .txt existence checks!)
 #          - Tracks every build_*_txt.py SHA-256 inside model_weights.npz (`builder_manifest_u8`)
-#          - Safe to delete .txt files after training; auto-runs ONLY new/changed build_*_txt.py (or all if .npz missing)
-#          - Preserves previously compiled Entity LUT (4,059+ names & countries) even if old .txt files were deleted!
+#          - Safe to delete .txt files after training; auto-runs ONLY new/changed build_*_txt.py
+#          - Preserves Entity LUT (a & b independently) + runs Offline Behavior Config & Zero-Fault Gates!
 
 import glob
 import hashlib
@@ -37,7 +37,7 @@ if torch.cuda.is_available():
     torch.backends.cuda.matmul.allow_tf32 = True
 
 try:
-    import torch_xla.core.xla_model as xm
+    import torch_xla.core.xla_model as xm  # noqa: F401
     HAS_XLA = True
 except ImportError:
     HAS_XLA = False
@@ -127,7 +127,7 @@ def collect_samples(bundle):
             if s:
                 sample_map[s] = (lf, wt)
     for raw_b, _cid, exp_lf in bundle.zero_fault_suite:
-        if exp_lf is not None and exp_lf not in (7, 75):
+        if exp_lf is not None and exp_lf not in (7, 75, 96):
             s = " ".join(raw_b.decode("ascii").strip().lower().split())
             if s:
                 sample_map[s] = (exp_lf, np.float32(42.0))
@@ -142,15 +142,21 @@ def collect_samples(bundle):
     return sample_map
 
 
+def _audit_offline_behavior_config():
+    if os.path.exists("bot_behavior_config.json") and os.path.exists("behavior_config_loader.py"):
+        from behavior_config_loader import load_behavior_config
+        bcfg = load_behavior_config("bot_behavior_config.json")
+        print(f"[OFFLINE CONFIG GATE OK] Verified '{bcfg.source_path}' ({bcfg.total_phrases} phrases, ZERO 64-bit)", flush=True)
+
+
 def run_unified_compiler(output_path="model_weights.npz", force=False, rebuild_data=False):
-    specs_digest = _compute_specs_digest()
-    cur_manifest = _compute_builder_manifest()
+    _audit_offline_behavior_config()
+    specs_digest, cur_manifest = _compute_specs_digest(), _compute_builder_manifest()
     bundle = discover_and_compile_all_specs()
     num_leaves = bundle.num_leaves
 
     vault_exists = os.path.exists(output_path)
-    prev_manifest, prev_ea, prev_eb, prev_bloom = {}, None, None, None
-    vault_ok = False
+    prev_manifest, prev_ea, prev_eb, prev_bloom, vault_ok = {}, None, None, None, False
     if vault_exists:
         with np.load(output_path, allow_pickle=False) as arc:
             if "vm_version_u8" in arc.files and int(arc["vm_version_u8"][0]) >= 14:
@@ -163,10 +169,9 @@ def run_unified_compiler(output_path="model_weights.npz", force=False, rebuild_d
                 vault_ok = specs_same and leaves_same and (prev_manifest == cur_manifest)
 
     if vault_ok and not force and not rebuild_data:
-        print(f"[VAULT UP-TO-DATE] All {len(bundle.spec_names)} specs ({num_leaves} leaves) & {len(cur_manifest)} builders locked in '{output_path}'! (Deleted .txt ignored)", flush=True)
+        print(f"[VAULT UP-TO-DATE] All {len(bundle.spec_names)} specs ({num_leaves} leaves) & {len(cur_manifest)} builders locked in '{output_path}'!", flush=True)
         return
 
-    # Run ONLY builders not yet recorded in model_weights.npz (or ALL builders if model_weights.npz missing / --rebuild-data)
     to_run = [py for py, h in cur_manifest.items() if rebuild_data or (not vault_exists) or (prev_manifest.get(py) != h)]
     for py_file in to_run:
         tag = "NO VAULT" if not vault_exists else ("REBUILD" if rebuild_data else "NEW/UPDATED STEP")
@@ -179,11 +184,9 @@ def run_unified_compiler(output_path="model_weights.npz", force=False, rebuild_d
     sample_map = collect_samples(bundle)
     super_bloom, entity_lut_a, entity_lut_b = build_entity_and_super_bloom(sample_map, wp_mat, bundle.leaf_step_map)
 
-    # Carry forward previously compiled Entity LUT & Super-Bloom so deleted .txt files NEVER lose names/countries!
     if prev_ea is not None and prev_eb is not None and prev_bloom is not None:
-        mask_empty = entity_lut_a == np.uint8(0)
-        entity_lut_a = np.where(mask_empty, prev_ea, entity_lut_a).astype(np.uint8)
-        entity_lut_b = np.where(mask_empty, prev_eb, entity_lut_b).astype(np.uint8)
+        entity_lut_a = np.where(entity_lut_a == np.uint8(0), prev_ea, entity_lut_a).astype(np.uint8)
+        entity_lut_b = np.where(entity_lut_b == np.uint8(0), prev_eb, entity_lut_b).astype(np.uint8)
         super_bloom = np.bitwise_or(super_bloom, prev_bloom, dtype=np.uint32)
 
     texts = list(sample_map.keys())
@@ -205,10 +208,8 @@ def run_unified_compiler(output_path="model_weights.npz", force=False, rebuild_d
     sw_np, text_to_row, n = np.array(wt_list, dtype=np.float32), {texts[i]: r for r, i in enumerate(keep_idx)}, len(keep_idx)
     print(f"[UNIFIED DATASET] Encoded {n} deduplicated rows across {num_leaves} leaves!", flush=True)
 
-    w_m_t = (w_t != 0).to(torch.float32).unsqueeze(-1)
-    w_c_t = torch.clamp(torch.sum(w_m_t, dim=1), min=1.0)
-    bg_m_t = (bg_t != 0).to(torch.float32).unsqueeze(-1)
-    bg_c_t = torch.clamp(torch.sum(bg_m_t, dim=1), min=1.0)
+    w_m_t, bg_m_t = (w_t != 0).to(torch.float32).unsqueeze(-1), (bg_t != 0).to(torch.float32).unsqueeze(-1)
+    w_c_t, bg_c_t = torch.clamp(torch.sum(w_m_t, dim=1), min=1.0), torch.clamp(torch.sum(bg_m_t, dim=1), min=1.0)
 
     torch.manual_seed(42)
     emb_word = torch.nn.Parameter(torch.randn((WORD_VOCAB, D_EMB), device=device, dtype=torch.float32) * 0.08)

@@ -1,0 +1,651 @@
+{
+  "_comment": "MASTER EDITABLE BOT BEHAVIOR, TIMING, PERCENTAGE & REPLY CONFIG — Edit any text, weight, or timer anytime (zero retraining needed).",
+  "version": 1,
+  "persona": {
+    "female_prob_within_1h": 0.05,
+    "female_prob_default": 0.08,
+    "female_cooldown_s": 3600,
+    "male_normal_prob": 0.20,
+    "male_ghoster_prob": 0.80,
+    "ghoster_convert_prob": 0.30,
+    "max_turns_min": 14,
+    "max_turns_max": 18,
+    "vip_prob": 0.01,
+    "bot_age": {
+      "young_prob": 0.75,
+      "young_min": 18,
+      "young_max": 24,
+      "older_min": 25,
+      "older_max": 30
+    },
+    "user_age": {
+      "min_adult": 18,
+      "max_adult": 80,
+      "young_max": 25
+    },
+    "female_can_share_name": false,
+    "female_names": ["Emma", "Sarah"],
+    "male_names": ["Rahul", "Vihaan", "Reyansh", "Siddharth", "Vikram", "Karan", "Sam"],
+    "name_templates": ["im {name}", "I'm {name}", "{name}", "{name} here"],
+    "countries_female": [
+      ["Indonesia", 50],
+      ["India", 30],
+      ["Philippines", 20],
+      ["Turkish", 20]
+    ],
+    "countries_male": [
+      ["India", 40],
+      ["Canada", 20]
+    ],
+    "country_templates_female": ["{country}", "I'm from {country}", "Im from {country}", "From {country}"],
+    "country_templates_male": ["I'm from {country}", "Im from {country}", "{country}", "from {country}"],
+    "female_india_special": {
+      "enabled": true,
+      "country": "India",
+      "bubble1": [["India", 50], ["From India", 50]],
+      "bubble2": [
+        "Sorry looking for Indian guys",
+        "I'm looking for guys from here",
+        "Sry looking for someone from India",
+        "Looking for local guys sry",
+        "Just looking for guys from my country",
+        "Sorry I want to talk to Indian guys"
+      ],
+      "disconnect_delay_s": 4.0
+    },
+    "cities_by_country": {
+      "Indonesia": ["Jakarta", "Bali", "Bandung", "Surabaya"],
+      "Philippines": ["Manila", "Cebu", "Davao", "Quezon"],
+      "Turkish": ["Istanbul", "Ankara", "Izmir", "Antalya"],
+      "India": ["Mumbai", "Delhi", "Bangalore", "Kerala"],
+      "Canada": ["Ontario", "Toronto", "Vancouver", "Montreal"]
+    },
+    "platform_interests": [
+      "Music", "Movies", "Anime", "Gaming", "Travel",
+      "Fitness", "Food", "Coffee", "Late Night Chats", "Art",
+      "Photography", "Books", "Sports", "Pets", "Comedy"
+    ]
+  },
+  "timers": {
+    "buffer_debounce_s": 0.4,
+    "buffer_max_chars": 400,
+    "opening_wait_s_weights": [
+      [16, 80], [18, 50], [17, 40], [11, 30],
+      [15, 20], [14, 10], [13, 10], [12, 10]
+    ],
+    "read_base_min_s": 1.6,
+    "read_base_max_s": 3.4,
+    "read_per_char_s": 0.045,
+    "read_char_cap_s": 2.2,
+    "curiosity_bonus_min_s": 1.0,
+    "curiosity_bonus_max_s": 2.4,
+    "curiosity_keywords": [
+      "fun", "secret", "intimate", "love", "like you", "like u",
+      "kiss", "hug", "date", "marry", "single", "hot", "cute",
+      "pretty", "beautiful", "sex", "naughty", "pic", "photo",
+      "why", "how", "what", "who", "where"
+    ],
+    "distraction_prob": 0.25,
+    "distraction_min_s": 1.2,
+    "distraction_max_s": 3.0,
+    "typing_cps_min": 7.5,
+    "typing_cps_max": 9.5,
+    "typing_max_s": 2.8,
+    "pause_split_min_s": 1.2,
+    "pause_split_max_s": 2.0,
+    "pause_opening_min_s": 0.9,
+    "pause_opening_max_s": 2.0,
+    "pause_followup_min_s": 2.2,
+    "pause_followup_max_s": 4.8,
+    "idle_base_s_weights": [
+      [16, 80], [18, 50], [17, 40], [15, 20],
+      [14, 10], [13, 10], [12, 10], [11, 10]
+    ],
+    "idle_base_add_s": 12.0,
+    "idle_opening_q_add_s": 5.0,
+    "idle_normal_q_add_s": 30.0,
+    "idle_disconnect_after_s": 0.1,
+    "ghoster_no_q_idle_min_s": 3.0,
+    "ghoster_no_q_idle_max_s": 8.0,
+    "disconnect_standard_s": 1.0,
+    "disconnect_spoiler_or_bored_bye_s": 1.5,
+    "disconnect_india_s": 4.0,
+    "disconnect_bored_silent_min_s": 2.5,
+    "disconnect_bored_silent_max_s": 5.5,
+    "disconnect_horny_m1_min_s": 2.0,
+    "disconnect_horny_m1_max_s": 4.5,
+    "disconnect_horny_m1_male_user_min_s": 2.0,
+    "disconnect_horny_m1_male_user_max_s": 4.0,
+    "disconnect_horny_m2_min_s": 1.5,
+    "disconnect_horny_m2_max_s": 3.5,
+    "disconnect_horny_m3_min_s": 1.5,
+    "disconnect_horny_m3_max_s": 3.0,
+    "ghoster_disconnect_s_weights": [[3, 50], [6, 40], [10, 30]]
+  },
+  "platform": {
+    "rate_limit_max_msgs": 15,
+    "rate_limit_window_s": 10.0,
+    "rate_limit_reply": "Wait a moment.",
+    "button_cooldown_s": 1.5,
+    "quota_window_s": 43200,
+    "quota_max_bot_matches": 20,
+    "quota_max_human_partners": 8,
+    "afk_timeout_s": 180,
+    "purge_timeout_s": 300,
+    "session_timeout_s": 600
+  },
+  "opening": {
+    "bubble_count_weights": [[1, 60], [2, 40], [3, 10], [4, 5]],
+    "male_greeting_prepend_prob": 0.35,
+    "female_bubble2_gender_prob": 0.55,
+    "female_native_greeting_prob": 0.10,
+    "female_greetings": [
+      ["Hi", 35], ["Hey", 30], ["Hello", 20], ["Heyy", 15],
+      ["Hiii", 10], ["Hy", 10], ["Hlo", 10], ["Hii", 5],
+      ["Hey there", 5], ["Yo", 5]
+    ],
+    "male_greetings": [
+      ["Hi", 60], ["Hey", 10], ["Hii", 10], ["Hy", 5], ["Hello", 5],
+      ["Yo", 5], ["Heyy", 5], ["Hlo", 5], ["Wassuppp?", 5], ["Wassupp?", 5]
+    ],
+    "male_opener_tags": [
+      ["M", 32], ["F?", 30], ["F or m", 10], ["m here", 8],
+      ["F m", 5], ["F m?", 5], ["M bi", 5], ["M {rand_21_27}", 5], ["Male", 5]
+    ],
+    "male_bubble2_gender_prompts": [["F or m?", 50], ["F?", 50]],
+    "male_bubble3_country": "from?",
+    "opening_nudges_male": [
+      ["Hi", 35], ["Sup?", 35], ["Hey", 30], ["U there?", 15], ["Heyy", 10],
+      ["Hlo", 10], ["So", 10], ["Hi there", 10], ["Howdy", 10], ["Yo", 5],
+      ["Anyone there?", 5], ["Helloo", 5], ["hello", 5]
+    ],
+    "opening_nudges_female": [
+      ["U there?", 40], ["Anyone there?", 30], ["Sup?", 30]
+    ]
+  },
+  "probabilities": {
+    "greet_reply_prob": 0.65,
+    "greet_mirror_prob": 0.46,
+    "greet_mirror_cap_prob": 0.70,
+    "greet_followup_prob": 0.70,
+    "gender_yn_direct_prob": 0.20,
+    "state_tell_first_prob": 0.35,
+    "state_tell_insist_prob": 0.45,
+    "state_deflect_first_prob": 0.45,
+    "state_deflect_followup_prob": 0.60,
+    "proactive_state_ask_prob": 0.05,
+    "hru_reciprocal_when_answered_prob": 0.50,
+    "hru_bounce_when_unanswered_prob": 0.55,
+    "female_react_prob": 0.65,
+    "female_advance_after_non_age_prob": 0.80,
+    "female_merge_bubble_prob": 0.45,
+    "female_proactive_ntmu_prob": 0.35,
+    "ntmu_followup_prob": 0.70,
+    "male_normal_ack_prob": 0.45,
+    "male_skip_name_stage_prob": 0.80,
+    "yn_pending_followup_prob": 0.75,
+    "bad_english_retry2_prob": 0.25,
+    "bad_english_fallback_turn5_prob": 0.15,
+    "leading_q_recall_prob": 0.50,
+    "private_strike1_annoyed": 0.10,
+    "private_strike1_stay": 0.65,
+    "private_strike1_maybe": 0.25,
+    "private_followup_prob": 0.55,
+    "qmark_s1_recall_prob": 0.50,
+    "qmark_s1_skip_group_prob": 0.65,
+    "qmark_s1_skip_disc": 0.10,
+    "qmark_s1_skip_next_q": 0.35,
+    "qmark_s2_skip_group_prob": 0.85,
+    "qmark_s2_skip_disc": 0.25,
+    "qmark_s2_skip_next_q": 0.35,
+    "qmark_s3_bored_disc_prob": 0.75,
+    "bored_disc_silent_prob": 0.85,
+    "insist_s1_reply_prob": 0.80,
+    "insist_s1_apology_prob": 0.45,
+    "insist_s1_deflect_followup_prob": 0.45,
+    "insist_s1_ignore_disc": 0.20,
+    "insist_s1_ignore_next_q": 0.35,
+    "insist_s2_answer_prob": 0.25,
+    "insist_s2_skip_group_prob": 0.75,
+    "insist_s2_skip_disc": 0.55,
+    "insist_s2_skip_next_q": 0.35,
+    "horny_m_s1_skip": 0.25,
+    "horny_m_s1_disc": 0.20,
+    "horny_m_s1_reply_male_user_disc": 0.50,
+    "horny_m_s1_followup": 0.45,
+    "horny_m_s2_disc": 0.65,
+    "horny_f_s1_skip": 0.25,
+    "horny_f_s1_silent": 0.10,
+    "horny_f_s1_followup": 0.50,
+    "media_s2_silent": 0.60,
+    "media_s2_next_q": 0.25,
+    "media_s1_spoiler_m_disc": 0.40,
+    "media_s1_spoiler_f_bye": 0.35,
+    "media_s1_spoiler_f_silent_rest": 0.60,
+    "media_s1_voice_m_silent": 0.40,
+    "media_s1_voice_f_silent": 0.25,
+    "media_s1_visual_m_skip": 0.35,
+    "media_s1_visual_f_silent": 0.20,
+    "media_s1_visual_f_skip": 0.25,
+    "media_s1_sticker_m_silent": 0.35,
+    "media_s1_sticker_m_skip": 0.40,
+    "media_s1_sticker_f_silent": 0.30,
+    "media_s1_sticker_f_skip": 0.35,
+    "media_f_pending_nudge_prob": 0.35,
+    "media_f_next_q_prob": 0.50,
+    "ghoster_convert_q_weights": [["q_name", 30], ["q_from", 35], ["q_age", 35]],
+    "extended_intent_followup_prob": 0.40
+  },
+  "topic_matrix": {
+    "female": {
+      "q_from": [0.50, 0.30, 0.20],
+      "q_age": [0.55, 0.20, 0.25],
+      "q_name": [0.00, 0.45, 0.55],
+      "q_look": [0.55, 0.25, 0.20],
+      "q_doing": [0.60, 0.15, 0.25],
+      "q_job": [0.55, 0.20, 0.25],
+      "q_married": [0.65, 0.15, 0.20],
+      "q_intimate": [0.00, 0.65, 0.35],
+      "q_horny": [0.65, 0.10, 0.25]
+    },
+    "male": {
+      "q_from": [0.60, 0.05, 0.35],
+      "q_age": [0.65, 0.10, 0.25],
+      "q_name": [0.35, 0.15, 0.50],
+      "q_look": [0.50, 0.15, 0.35],
+      "q_doing": [0.55, 0.10, 0.35],
+      "q_job": [0.55, 0.15, 0.30],
+      "q_married": [0.70, 0.10, 0.20],
+      "q_intimate": [0.00, 0.50, 0.50],
+      "q_horny": [0.55, 0.20, 0.25]
+    }
+  },
+  "stage_questions": {
+    "female": {
+      "q_doing": [
+        ["How are you", 30], ["Hru?", 30], ["How are you?", 25],
+        ["What are you doing?", 20], ["Wyd?", 20], ["Wyd", 10],
+        ["Wyd here", 10], ["Hru", 10], ["What r u doing?", 10], ["How are u?", 5]
+      ],
+      "q_from": [
+        ["From", 40], ["From?", 30], ["Where u from?", 20], ["U from?", 15],
+        ["Where r u from?", 10], ["Where are you from", 5], ["Where are u from?", 2],
+        ["Where do u live?", 2], ["Which country u from?", 2], ["Where are you located?", 1]
+      ],
+      "q_age": [
+        ["Age", 45], ["How old are you", 30], ["Age?", 30], ["Ur age?", 20],
+        ["How old are u?", 5], ["how old r u?", 5], ["how old r uuu?", 5]
+      ],
+      "q_age_branch_young": [
+        ["Ok", 30], ["U watch anime?", 5], ["Fav movie?", 5], ["U play games?", 5]
+      ],
+      "q_age_branch_older": [
+        ["What u into?", 30], ["how's it going?", 15], ["Wyd rn?", 15],
+        ["How's ur day been?", 12], ["You been busy?", 8], ["Just chilling?", 8],
+        ["Can't sleep?", 5]
+      ],
+      "q_job": [
+        ["Where do u work?", 40], ["What do u do?", 30], ["what do u do?", 25],
+        ["U studying or working?", 20], ["U work or study?", 20], ["Working or studying?", 20],
+        ["Still studying or working?", 15], ["Got a job or studying?", 15],
+        ["Are u a student?", 5], ["Are u in college?", 5]
+      ],
+      "q_married": [
+        ["single?", 30], ["married?", 30], ["Do u have a gf?", 30], ["U married?", 25],
+        ["Married or single", 20], ["Single or in a relationship?", 15],
+        ["Are you seeing anyone or single?", 15], ["Are you single or married?", 10],
+        ["Do u have a gf or single?", 5]
+      ],
+      "q_look": [
+        ["What are u looking for?", 30], ["What brings u to this chat?", 25],
+        ["What brings u here?", 20], ["U looking for", 10], ["So, what brings u here?", 10]
+      ],
+      "q_intimate": [
+        ["Tell me a fun fact about yourself", 20], ["What's your type?", 20],
+        ["Tell me a secret", 15], ["Come on, tell me a secret", 15]
+      ]
+    },
+    "male": {
+      "q_name": [
+        ["Your name?", 40], ["Name", 20], ["Ur name?", 20], ["Name?", 5], ["What's ur name?", 5]
+      ],
+      "q_from": [
+        ["From", 35], ["From?", 30], ["Where u from?", 5], ["U from?", 5]
+      ],
+      "q_age": [
+        ["Age", 40], ["Age?", 35], ["How old?", 20], ["Ur age?", 15], ["What is your age", 5]
+      ]
+    }
+  },
+  "pools": {
+    "underage_reject": [["sorry, 18+ adults only!", 100]],
+    "reset_chat": [["new chat started! say hi :)", 100]],
+    "gender_reveal_female": [
+      ["F", 40], ["Female", 15], ["W", 15], ["Girl", 15],
+      ["F here", 15], ["Woman", 5], ["Im a girl", 5]
+    ],
+    "gender_reveal_male": [
+      ["M", 45], ["m", 25], ["M here", 20], ["m here", 10]
+    ],
+    "gender_yn_female": [
+      ["yes", 20], ["yes f", 20], ["yeah f", 20], ["yes im f", 20], ["yep f", 20]
+    ],
+    "gender_yn_male": [
+      ["No m", 25], ["no im m", 25], ["nah m", 25], ["M", 25]
+    ],
+    "post_gender_female": [
+      ["Where u from?", 20], ["From?", 15], ["How old are you?", 15],
+      ["What are you doing?", 15], ["What brings you here", 10],
+      ["Ohh nice | Where u from?", 10], ["Ohh okay nice", 8],
+      ["Nice to meet u!", 7], ["Cool haha | How old are u?", 5],
+      ["Im bored lol | Wyd rn?", 5]
+    ],
+    "post_gender_male": [
+      ["From?", 25], ["Age?", 20], ["Oh nice | Where u from?", 15],
+      ["Name?", 10], ["Cool", 10], ["Nice", 10], ["Are you married", 10],
+      ["Cool | How old are u?", 10], ["Any gf", 3], ["What do you want to tell me?", 3]
+    ],
+    "age_evade": [["Guess", 50], ["How old would you say?", 50]],
+    "age_react_female_young": [["Ok", 35], ["cool", 20], ["Nicee", 10]],
+    "age_react_female_older": [["{age}, nice", 40], ["Ok", 35], ["Oh {age} nice", 10], ["Cool", 10]],
+    "country_evade_female": [
+      ["Guess", 20], ["Take a guess", 20], ["Not telling", 20],
+      ["You tell me", 20], ["Guess first", 20]
+    ],
+    "country_evade_male": [["Guess", 50], ["Where would you say?", 50]],
+    "country_evade_append": [[", Where u from?", 50], [", From?", 50]],
+    "country_react_female": [
+      ["Oh {country} nice", 17], ["Ahh cool", 17], ["Ohh okay", 17],
+      ["{country}, gotcha", 17], ["Nicee", 16], ["Oh thats cool", 16]
+    ],
+    "male_short_ack": [["Cool", 25], ["Nice", 25], ["Oh nice", 25], ["Ok", 25]],
+    "proactive_state_ask": [
+      ["State?", 25], ["Which state?", 25], ["What state?", 25], ["Which part?", 25]
+    ],
+    "state_deflect_female": [
+      ["It's a secret", 20], ["Not sharing my city on here", 20], ["Guess", 20],
+      ["Rather not say my city", 20], ["Take a guess", 20]
+    ],
+    "state_deflect_male": [
+      ["It's a secret", 20], ["Guess", 20], ["Not sharing my exact city", 20],
+      ["Rather not say", 20], ["Take a guess", 20]
+    ],
+    "name_deflect_female": [
+      ["Not sharing my name on here", 17], ["It's a secret", 17], ["Rather not say", 17],
+      ["Too soon for names", 17], ["I keep my name private here", 16], ["Maybe later", 16]
+    ],
+    "name_evade_male": [["Maybe later", 50], ["Not telling just yet", 50]],
+    "hru_reciprocal": [
+      ["Same", 17], ["Fine", 17], ["Gud", 17], ["Same here", 17], ["Good", 16], ["Well", 16]
+    ],
+    "hru_ans_female": [
+      ["I'm good", 25], ["Just chilling in bed", 25],
+      ["Nothing much, just bored", 25], ["Doing good", 25]
+    ],
+    "hru_ans_male": [
+      ["Good", 25], ["I'm good", 25], ["Just chilling", 25], ["Nothing much, bored", 25]
+    ],
+    "hru_bounce_female": [
+      ["Good, u?", 17], ["Fine, u?", 17], ["Im good, wbu?", 17],
+      ["Good", 17], ["Fine", 16], ["Gud", 16]
+    ],
+    "hru_bounce_male": [
+      ["Good u?", 17], ["Fine u?", 17], ["Good, wbu?", 17],
+      ["Good", 17], ["Fine", 16], ["Gud", 16]
+    ],
+    "hru_evade_female": [["Nothing much", 34], ["Same old", 33], ["Just taking it easy", 33]],
+    "hru_evade_male": [["Can't complain", 34], ["Same old", 33], ["Just taking it easy", 33]],
+    "doing_react_female": [
+      ["That's cool", 30], ["Ohh nice", 20], ["Cool", 20], ["Sounds good", 15],
+      ["Not bad", 15], ["Nicee", 10], ["I see", 10], ["Oh really", 5]
+    ],
+    "look_ans_female": [
+      ["Just chatting and meeting new people", 25], ["Just bored looking to chat", 25],
+      ["Making friends, maybe more if we vibe", 25], ["Someone nice to talk to", 25]
+    ],
+    "look_ans_male": [
+      ["Just chatting", 25], ["Looking for someone cool to chat with", 25],
+      ["Just bored here", 25], ["Meeting new people", 25]
+    ],
+    "look_evade_female": [
+      ["Just seeing how things go", 34], ["Depends on the vibe", 33], ["Haven't really decided", 33]
+    ],
+    "look_evade_male": [
+      ["Just seeing how it goes", 34], ["Haven't really decided", 33], ["Depends who I meet", 33]
+    ],
+    "job_ans_female": [["I'm a student", 34], ["Studying", 33], ["In college rn", 33]],
+    "job_ans_male": [["Working", 34], ["I'm a student", 33], ["In college", 33]],
+    "job_evade_female": [
+      ["A bit of this and that", 34], ["Nothing too interesting", 33], ["I'd rather not get into that", 33]
+    ],
+    "job_evade_male": [["A bit of this and that", 50], ["Nothing too exciting", 50]],
+    "married_ans": [["I'm single", 34], ["Single", 33], ["Not married", 33]],
+    "married_evade": [["Why do you ask?", 34], ["What makes you ask?", 33], ["Why, are you asking?", 33]],
+    "secret_evade_female": [
+      ["I asked you first", 17], ["It's a secret", 17], ["You tell me first", 17],
+      ["You first", 17], ["Rather not say", 16], ["Let's leave that one", 16]
+    ],
+    "secret_evade_male": [
+      ["You tell me first", 17], ["It's a secret", 17], ["Not telling", 17],
+      ["You first", 17], ["Rather not say", 16], ["Let's leave that one", 16]
+    ],
+    "ntmu_reply": [
+      ["Nice to meet u too", 25], ["nice to meet u!", 20], ["Nice to meet u too!", 10],
+      ["Aww, nice to meet u!", 10], ["Nice to meet u", 10]
+    ],
+    "ntmu_proactive_append": [
+      [", Nice to meet u btw!", 25], [", Nice meeting u!", 25],
+      [", Nice meeting u here!", 25], [", Nice to meet u haha", 25]
+    ],
+    "private_stay": [
+      ["Let's chat here", 40], ["We can talk here", 40], ["Not sharing my ID", 40],
+      ["I prefer here", 30], ["I'm good here", 25], ["Here is fine", 20],
+      ["This chat is fine", 20], ["Nah here is better", 10], ["Here works for me", 10],
+      ["I'm staying here", 5], ["Rather stay anonymous", 5]
+    ],
+    "private_maybe": [
+      ["Idk maybe later", 40], ["Maybe if we vibe", 30], ["Not rn", 30],
+      ["Not yet", 20], ["A bit too soon", 20], ["We just matched", 20], ["Hmm", 20],
+      ["Maybe, let's see", 10], ["Let's see first", 10], ["Not that fast", 10],
+      ["Maybe after some chatting", 10], ["Let's take it slow", 10], ["Hmm maybe", 10],
+      ["We barely know each other", 10], ["Let's see how it goes", 10], ["Who knows", 10]
+    ],
+    "private_annoyed": [
+      ["Can we just chat here", 45], ["Not giving out my ID", 30], ["Just chat here pls", 20],
+      ["Why so fast", 10], ["Already asking for my ID?", 5], ["Bro we just matched", 5],
+      ["I said here", 5], ["I'm not comfortable with that", 5], ["Nope, not sharing", 5]
+    ],
+    "insist_apology_female": [["Oh sry haha,", 34], ["My bad lol,", 33], ["Oh haha", 33]],
+    "insist_apology_male": [["Oh sry,", 34], ["My bad,", 33], ["Oh", 33]],
+    "insist_deflect_female": [
+      ["What didn't I answer?", 17], ["Wait what did you ask?", 17], ["Wdym?", 17],
+      ["I did answer", 17], ["Chill", 16], ["Huh? What question?", 16]
+    ],
+    "insist_deflect_male": [
+      ["What?", 20], ["Wdym", 20], ["What did u ask", 20], ["I did lol", 20], ["Chill", 20]
+    ],
+    "insist_pushback_female": [
+      ["U ask too much lol", 20], ["Chill why are u mad haha", 20], ["Relax lol", 20],
+      ["Stop complaining haha", 20], ["Idk what u want me to say lol", 20]
+    ],
+    "insist_pushback_male": [
+      ["Chill bro", 25], ["Relax", 25], ["Why u mad", 25], ["U talk too much", 25]
+    ],
+    "bored_bye_female": [
+      ["Alright im out, bye", 20], ["U complain too much lol bye", 20],
+      ["Too dramatic lol bye", 20], ["Okay bye", 20], ["Im gonna skip, bye", 20]
+    ],
+    "bored_bye_male": [["Bye", 34], ["Ok bye", 33], ["Cya", 33]],
+    "qmark_annoyed": [
+      ["What??", 20], ["Use words lol", 20], ["Why keep sending ?", 20], ["?", 20], ["Huh?", 20]
+    ],
+    "confused_reply": [
+      ["Huh?", 17], ["Wdym?", 17], ["Wait what lol", 17],
+      ["What do u mean?", 17], ["I dont get it haha", 16], ["How so?", 16]
+    ],
+    "dry_s1_no_q": [
+      ["Just {word}? haha", 20], ["Anything else? lol", 20], ["Ohh okay, and?", 20],
+      ["Haha thats all?", 20], ["Tell me a bit more", 20]
+    ],
+    "dry_s2_no_q": [
+      ["You're quiet", 17], ["Not much to say?", 17], ["I'm listening", 17],
+      ["Anything else?", 17], ["Come on", 16], ["Okay then", 16]
+    ],
+    "dry_pending_react": [
+      ["Ohh", 13], ["Okay", 13], ["I see", 13], ["Cool", 13],
+      ["Alright", 12], ["Okee", 12], ["No worries", 12], ["Hmm", 12]
+    ],
+    "dry_bye": [
+      ["Alright bye", 17], ["Okay im off", 17], ["Ill leave u to it, bye", 17],
+      ["Guess thats it then, bye", 17], ["Okay cya", 16], ["Im gonna skip, take care", 16]
+    ],
+    "generic_no": [
+      ["Oh okay", 17], ["Ahh fair enough", 17], ["Haha alright", 17],
+      ["Gotcha", 17], ["No worries", 16], ["I see lol", 16]
+    ],
+    "pending_yn_react": [
+      ["Oh nice!", 25], ["Ahh okay gotcha", 25], ["Haha cool", 25], ["Oh really, nice", 25]
+    ],
+    "pending_invalid_react": [["Haha i see", 50], ["Wdym?", 50]],
+    "media_s2_female": [
+      ["Ow haha", 15], ["ohh", 15], ["Why", 14], ["What", 14], ["uhh", 14], ["Hmm", 14], ["Hmmm", 14]
+    ],
+    "media_s2_male": [["Ohh", 20], ["Uhh", 20], ["Oh", 20], ["Why", 20], ["What", 20]],
+    "media_spoiler_male": [["Uhh", 20], ["Wtf", 20], ["Ohh", 20], ["Why", 20], ["What", 20]],
+    "media_spoiler_female_bye": [
+      ["Hmm", 13], ["Hum", 13], ["aww", 13], ["Ew wtf", 13], ["Why", 12],
+      ["What", 12], ["Uhh no thanks bye", 12], ["Im not opening that lol bye", 12]
+    ],
+    "media_spoiler_female_react": [
+      ["Hmm", 17], ["Haha", 17], ["Ohh", 17], ["Why", 17], ["What", 16], ["why is it blurred?", 16]
+    ],
+    "media_visual_male": [["Nice", 20], ["Cool", 20], ["Oh nice", 20], ["Why", 20], ["What", 20]],
+    "media_visual_female_early": [
+      ["Ohh", 15], ["Oh", 15], ["Haha", 14], ["Why", 14], ["What", 14], ["Nice", 14], ["Cool", 14]
+    ],
+    "media_visual_female_late": [["oh nice!", 25], ["Haha", 25], ["Ow haha", 25], ["Cool", 25]],
+    "media_voice_male": [["ohh", 25], ["Ohhh", 25], ["Why", 25], ["What", 25]],
+    "media_voice_female": [
+      ["Oh", 17], ["Ohh", 17], ["Why", 17], ["What", 17], ["Ow haha", 16], ["Haha", 16]
+    ],
+    "media_sticker_male": [
+      ["Lol", 17], ["Haha", 17], ["Nice", 17], ["Humm", 17], ["Why", 16], ["What", 16]
+    ],
+    "media_sticker_female": [["Haha", 20], ["Lol", 20], ["Oh", 20], ["Why", 20], ["What", 20]],
+    "media_female_nudge": [
+      [", You didn't answer me", 17], [", Why", 17], [", What", 17],
+      [", Tell me first", 17], [", Don't dodge my question", 16], [", You still didn't answer", 16]
+    ],
+    "horny_male_reply": [
+      ["Im a man", 17], ["Im into females", 17], ["Im into girls", 17],
+      ["Im a guy bro", 17], ["Bro im M", 16], ["Not into guys", 16]
+    ],
+    "horny_female_reply": [
+      ["Not really", 20], ["A little maybe", 20], ["Not rn", 20],
+      ["Depends", 20], ["Not in the mood", 20]
+    ],
+    "horny_female_reply_ask": [
+      ["Not really", 17], ["A little maybe", 17], ["Not rn", 17],
+      ["Depends", 17], ["Not in the mood", 16], ["Why, are you?", 16]
+    ],
+    "repeat_warn": [
+      ["You asked that already", 25], ["Didn't I answer that", 25],
+      ["I think I said that already", 25], ["Scroll up", 25]
+    ],
+    "repeat_spam_bye": [
+      ["Same question again, bye", 34], ["I'm gonna skip now, bye", 33], ["Alright I'm out, bye", 33]
+    ],
+    "max_turns_bye": [
+      ["Bye", 15], ["Byee", 12], ["Just leave me alone", 10], ["Cya", 8], ["Gtg", 7],
+      ["Byeee", 5], ["Leave me alone", 5], ["I don't wanna talk anymore", 5],
+      ["Please stop messaging me", 5], ["I'm done talking", 5], ["Night", 4],
+      ["Alright bye", 4], ["Bye :)", 3], ["Okay byee", 3], ["Gotta run", 3], ["Byee :)", 3]
+    ],
+    "bad_english_check": [
+      ["U speak english?", 20], ["Is english ur first language?", 20],
+      ["U speak a little english?", 20], ["Are u fluent in english?", 20],
+      ["U fluent in english?", 20], ["Wait do u understand me lol", 15],
+      ["U understand english?", 5], ["Ur english ok?", 5],
+      ["Sry if my english is confusing lol", 5]
+    ],
+    "female_safe_fallback": [
+      ["Ow haha", 13], ["Fr?", 13], ["Oh really?", 13], ["Haha nice", 13],
+      ["Ohh okay", 12], ["Tell me more", 12], ["I see lol", 12], ["Oh thats cool", 12]
+    ],
+    "gift_thank_you": [
+      ["Omg thank u so much for the {emoji}!! That's so sweet of u", 100]
+    ]
+  },
+  "validation_keywords": {
+    "confused_tokens": ["huh", "what", "wtf", "wut", "han", "bruh", "nor what", "think", "wdym"],
+    "dry_tokens": ["ok", "oko", "k", "kk", "hm", "hmm", "umm", "gt", "idk", "idc", "..."],
+    "yes_tokens": ["yes", "yeah", "yep", "yup", "ya", "sure", "si", "oui"],
+    "no_tokens": ["no", "nah", "nope", "non", "not really", "nothing", "none", "nada"],
+    "bounce_tokens": ["u", "you", "wbu", "hbu", "and u", "and you", "yours", "urself", "yourself"],
+    "counter_question_words": ["which", "what", "why", "where", "who", "how", "when", "wdym", "huh"],
+    "false_text_fillers": ["hi", "hey", "hello", "yo", "sup", "fine", "good", "nothing", "nm", "wbu", "u", "ok", "lol", "haha"],
+    "job_keywords": [
+      "work", "working", "job", "student", "study", "studying", "college", "uni",
+      "university", "school", "engineer", "doctor", "nurse", "teacher", "dev",
+      "developer", "programmer", "business", "office", "freelance", "designer",
+      "manager", "chef", "driver", "mechanic", "lawyer", "accountant", "unemployed",
+      "intern", "internship", "graduated", "company", "hospital", "shop", "store"
+    ],
+    "horny_statement_markers": ["im", "i'm", "lm", "am", "so", "very", "feeling", "feel"]
+  },
+  "extended_intent_replies": {
+    "20": ["aw thank u haha", "haha thanks :)", "aw ur sweet", "haha stop lol"],
+    "21": ["haha yeah", "ikr lol", "fr haha", "nicee"],
+    "29": ["i love pop and chill rnb, wbu?", "mostly pop, lofi and hiphop! u?"],
+    "30": ["i play a bit of minecraft and gta sometimes, wbu?", "mostly chill games lol, what do u play?"],
+    "31": ["i love horror movies and some anime, wbu?", "mostly netflix shows and comedy movies! u?"],
+    "32": ["i like going to the gym and swimming, u?", "mostly working out and watching football, wbu?"],
+    "33": ["music, movies, traveling and chilling lol, wbu?", "just listening to music, watching shows and hanging out! u?"],
+    "34": ["ooh nice taste in music!", "cool, love good music too"],
+    "35": ["oh nice, gamer vibes haha", "cool! sounds fun"],
+    "36": ["ooh nice, i like watching that too", "oh cool taste in shows"],
+    "37": ["nice! staying active is good", "cool, i respect that"],
+    "38": ["oh thats a cool hobby!", "nicee, sounds chill"],
+    "48": ["not sending pics on here sry", "haha too soon for pics lol", "nah i dont share pics here"],
+    "49": ["average height, dark hair, brown eyes haha, u?", "nothing crazy, dark hair and chill vibe lol"],
+    "50": ["up to u haha, no pressure", "only if u want lol"],
+    "51": ["haha fair enough, no pics needed", "all good, no pressure"],
+    "52": ["haha no im not a bot lol", "nah im real haha, just type fast", "nope not a bot"],
+    "53": ["im real lol not a bot", "yeah im a real person haha", "100% real haha"],
+    "55": ["goodnight, sleep well!", "gn, sweet dreams!"],
+    "56": ["ok np, take ur time", "alright ill wait"],
+    "59": ["mostly english haha, wbu?", "just english for me, what languages do u speak?"],
+    "60": ["haha dont worry ur english is totally fine", "no worries i understand u fine"],
+    "61": ["ok whats something fun about u?", "alright, morning person or night owl?"],
+    "62": ["ooh ok keep it clean haha, truth or dare?", "haha sure, u want truth or dare?"],
+    "63": ["just a chill person bored chatting here lol, wbu?", "love music, late night chats and good vibes, u?"],
+    "64": ["haha u seem cool so far", "ur vibe is nice so far haha"],
+    "65": ["haha slow down we just matched lol", "too fast lol let's just chat here"],
+    "66": ["aww haha thats sweet", "haha virtual hug back"],
+    "67": ["np haha", "anytime!", "no worries"],
+    "68": ["no worries at all", "all good haha", "dont stress it"],
+    "69": ["yeah im here", "yep still here haha", "right here"],
+    "71": ["nah not into that, keep it clean", "nope not here for that"],
+    "73": ["its kinda late here too lol, what time is it there?", "haha night owl vibes, is it late where u are?"],
+    "74": ["weather is pretty chill here, hows it there?", "not bad here today, hot or cold where u live?"],
+    "77": ["haha same, just chatting with u", "aww haha talking to u too"],
+    "78": ["ok truth: whats a random fact about u?", "truth: whats ur biggest green flag?"],
+    "79": ["dare: describe urself in 3 words haha", "dare: tell me ur fav song right now"],
+    "80": ["haha same vibe honestly", "nice choice, i like that too"],
+    "81": ["someone funny, respectful and easy to talk to, wbu?", "good vibes and honesty mostly, whats ur type?"],
+    "82": ["depends on the connection honestly, wbu?", "doesnt really matter if we vibe, u?"],
+    "83": ["no smoking for me and i love pets, wbu?", "pretty chill lifestyle, love dogs and cats, u?"],
+    "84": ["oh nice, sounds cool!", "aww nice!"],
+    "85": ["im a Libra haha, whats ur sign?", "Scorpio here, wbu?"],
+    "86": ["why dont scientists trust atoms? they make up everything haha", "what do u call a fake noodle? an impasta lol"],
+    "87": ["aw sorry ur having a rough day, hope it gets better!", "sending good vibes, bad days suck"],
+    "88": ["pizza and sushi for sure, whats ur fav food?", "pasta and burgers lol, wbu?"],
+    "89": ["ooh now im hungry too haha", "yum good taste in food"],
+    "90": ["haha my bad, im literally staring at my phone in bed right now", "lol i just type super fast on my phone"],
+    "91": ["haha same, literally nothing else to do rn", "relatable lol, killing time here too"],
+    "92": ["haha glad we're cool", "awesome haha"],
+    "93": ["haha swear im serious lol", "for real tho, no cap haha"],
+    "94": ["haha fair enough", "i feel u lol", "makes sense"],
+    "95": ["haha just curious", "no big reason, just chatting"]
+  }
+}

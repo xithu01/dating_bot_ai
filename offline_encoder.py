@@ -26,8 +26,8 @@ BIT_GLOBAL_KNOWN = np.uint32(1 << 31)
 
 COUNTRY_GROUPS = (
     (1, ("tunisia", "tunis", "tuinsi", "tuinsia", "tunsia", "tunisa", "tunisi", "tunisie", "tunisian", "tounsi", "tounsia", "tun", "tn", "sfax", "souse")),
-    (2, ("india", "ind", "indian", "hindi", "handi", "inida", "indai", "hindustan", "bharat", "desi", "mumbai", "delhi")),
-    (3, ("usa", "america", "american", "states", "murica", "nyc", "cali", "california", "texas", "florida")),
+    (2, ("india", "ind", "indian", "hindi", "handi", "inida", "indai", "hindustan", "bharat", "desi", "mumbai", "delhi", "bangalore", "kerala", "punjab")),
+    (3, ("usa", "america", "american", "states", "murica", "nyc", "newyork", "cali", "california", "texas", "florida")),
     (4, ("uk", "britain", "british", "england", "english", "brit", "london", "scotland")),
     (5, ("algeria", "alg", "dz", "dziri", "algerie", "algerian", "algiers", "oran")),
     (6, ("moroco", "maroc", "ma", "morocan", "maghreb", "casablanca", "rabat")),
@@ -36,13 +36,13 @@ COUNTRY_GROUPS = (
     (9, ("germany", "de", "german", "geramny", "berlin")),
     (10, ("italy", "ita", "italia", "italian", "rome", "milan")),
     (11, ("spain", "esp", "espana", "spanish", "madrid")),
-    (12, ("canada", "ca", "canadian", "toronto")),
+    (12, ("canada", "ca", "canadian", "toronto", "ontario", "vancouver", "montreal")),
     (13, ("saudi", "ksa", "riyadh", "arabia")),
     (14, ("uae", "dubai", "emirati", "emirates", "abudhabi")),
-    (15, ("turkey", "tr", "turk", "turkiye", "turkish", "istanbul")),
+    (15, ("turkey", "tr", "turk", "turkiye", "turkish", "istanbul", "ankara", "izmir", "antalya")),
     (16, ("pakistan", "pak", "paki", "pakistani", "lahore", "karachi")),
-    (17, ("indonesia", "indo", "indonesian", "jakarta", "bali")),
-    (18, ("philipines", "ph", "pinoy", "pinay", "filipino", "filipina", "manila")),
+    (17, ("indonesia", "indo", "indonesian", "jakarta", "bali", "bandung", "surabaya")),
+    (18, ("philipines", "ph", "pinoy", "pinay", "filipino", "filipina", "manila", "cebu", "davao", "quezon")),
     (19, ("brazil", "br", "brasil", "brazilian", "rio")),
 )
 
@@ -58,6 +58,7 @@ DEFAULT_M_NAMES = (
     "hatem", "omar", "ahmed", "ahmad", "mohamed", "mohammed", "ali", "youssef", "yousef", "amine",
     "yassine", "mehdi", "karim", "rami", "walid", "bilel", "bilal", "hamza", "aymen", "anas",
     "zied", "rayen", "tarak", "tarek", "tariq", "rahul", "rohit", "arjun", "carlos", "mateo",
+    "vihaan", "reyansh", "siddharth", "vikram", "karan",
 )
 
 NAME_BLACKLIST = frozenset((
@@ -156,7 +157,7 @@ def build_entity_and_super_bloom(sample_map, wp_mat, leaf_step_map):
             super_bloom[h[:3]] |= s2_bit
 
     for text, (leaf, _w) in sample_map.items():
-        if leaf == 0 or leaf == 75:
+        if leaf == 0 or leaf == 75 or leaf == 96:
             continue
         step_b = int(leaf_step_map.get(leaf, 15))
         bit_val = np.uint32(1 << min(step_b, 29)) | BIT_GLOBAL_KNOWN
@@ -173,10 +174,7 @@ def build_entity_and_super_bloom(sample_map, wp_mat, leaf_step_map):
 
 
 def encode_message_exact(raw_bytes, char_lut, rej_lut, wp_mat, super_bloom, entity_lut_a, entity_lut_b):
-    w_ids = np.zeros((6,), dtype=np.int32)
-    bg_ids = np.zeros((7,), dtype=np.int32)
-    s_vec = np.zeros((D_STRUCT,), dtype=np.float32)
-
+    w_ids, bg_ids, s_vec = np.zeros((6,), dtype=np.int32), np.zeros((7,), dtype=np.int32), np.zeros((D_STRUCT,), dtype=np.float32)
     b_full = np.frombuffer(raw_bytes[:64], dtype=np.uint8)
     non_ws = np.flatnonzero(b_full > np.uint8(32))
     if non_ws.shape[0] == 0:
@@ -193,6 +191,11 @@ def encode_message_exact(raw_bytes, char_lut, rej_lut, wp_mat, super_bloom, enti
     body = raw_u8[2 : 2 + n_tok]
     if bool(np.any(rej_lut[body])):
         return 0, 0, 0, w_ids, bg_ids, s_vec
+    if n_tok >= 5:
+        for zi in np.flatnonzero(body == 48):
+            z = int(zi)
+            if z > 0 and z + 1 < n_tok and (int(body[z - 1]) | 32) == 104 and (int(body[z + 1]) | 32) == 114:
+                body[z] = np.int32(111)
 
     has_q, has_s = bool(np.any(body == 63)), bool(np.any(body == 47))
     dig_idx = np.flatnonzero((body >= 48) & (body <= 57))
@@ -217,7 +220,11 @@ def encode_message_exact(raw_bytes, char_lut, rej_lut, wp_mat, super_bloom, enti
         kept = kept[1:]
     k_len = int(kept.shape[0])
     if k_len == 0:
-        return (3, age_val, 0, w_ids, bg_ids, s_vec) if age_val >= 18 else (0, 0, 0, w_ids, bg_ids, s_vec)
+        if age_val >= 18:
+            return 3, age_val, 0, w_ids, bg_ids, s_vec
+        if has_q and bool(np.all((b_full[first_idx:last_idx] == 63) | (b_full[first_idx:last_idx] == 32))):
+            return 96, 0, 0, w_ids, bg_ids, s_vec
+        return 0, 0, 0, w_ids, bg_ids, s_vec
 
     sp = np.flatnonzero(kept == np.int32(32))
     if int(sp.shape[0]) > 5:
@@ -265,19 +272,13 @@ def encode_message_exact(raw_bytes, char_lut, rej_lut, wp_mat, super_bloom, enti
     eos_tok = 4101 if has_q else (4100 if has_s else 4099)
     bg_ids[n_words] = np.int32((((int(w_ids[n_words - 1]) * 131 + eos_tok) & 0x7FFFFFFF) % BIGRAM_MOD) + 1)
 
-    s_vec[0] = np.float32(1.0) if has_q else np.float32(0.0)
-    s_vec[1] = np.float32(1.0) if has_s else np.float32(0.0)
-    s_vec[2] = np.float32(1.0) if age_val >= 18 else np.float32(0.0)
-    s_vec[4] = np.float32(1.0) if ctry_id > 0 else np.float32(0.0)
-    s_vec[5] = np.float32(1.0) if has_nf else np.float32(0.0)
-    s_vec[6] = np.float32(1.0) if has_nm else np.float32(0.0)
-    s_vec[8] = np.float32(1.0) if n_words == 1 else np.float32(0.0)
-    s_vec[9] = np.float32(n_words) / np.float32(6.0)
+    s_vec[0], s_vec[1] = (np.float32(1.0) if has_q else np.float32(0.0)), (np.float32(1.0) if has_s else np.float32(0.0))
+    s_vec[2], s_vec[4] = (np.float32(1.0) if age_val >= 18 else np.float32(0.0)), (np.float32(1.0) if ctry_id > 0 else np.float32(0.0))
+    s_vec[5], s_vec[6] = (np.float32(1.0) if has_nf else np.float32(0.0)), (np.float32(1.0) if has_nm else np.float32(0.0))
+    s_vec[8], s_vec[9] = (np.float32(1.0) if n_words == 1 else np.float32(0.0)), np.float32(n_words) / np.float32(6.0)
     s_vec[10] = np.float32(1.0) if is_wc_name else np.float32(0.0)
-    s_vec[11] = np.float32(1.0) if (active_mask & (1 << 1)) != 0 else np.float32(0.0)
-    s_vec[12] = np.float32(1.0) if (active_mask & (1 << 2)) != 0 else np.float32(0.0)
-    s_vec[13] = np.float32(1.0) if (active_mask & (1 << 4)) != 0 else np.float32(0.0)
-    s_vec[14] = np.float32(1.0) if (active_mask & (1 << 8)) != 0 else np.float32(0.0)
+    s_vec[11], s_vec[12] = (np.float32(1.0) if (active_mask & (1 << 1)) != 0 else np.float32(0.0)), (np.float32(1.0) if (active_mask & (1 << 2)) != 0 else np.float32(0.0))
+    s_vec[13], s_vec[14] = (np.float32(1.0) if (active_mask & (1 << 4)) != 0 else np.float32(0.0)), (np.float32(1.0) if (active_mask & (1 << 8)) != 0 else np.float32(0.0))
     s_vec[15] = np.float32(1.0) if (age_val >= 18 and ctry_id > 0) else np.float32(0.0)
     return -1, age_val, ctry_id, w_ids, bg_ids, s_vec
 

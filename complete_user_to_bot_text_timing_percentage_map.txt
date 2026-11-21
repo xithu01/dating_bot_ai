@@ -1,0 +1,715 @@
+================================================================================
+COMPLETE USER-TO-BOT TEXT, WAIT TIMING & PERCENTAGE REPLY MAP
+(100% Plain Text Catalog — Every User Input, Every Bot Reply, Weights & Timers)
+================================================================================
+
+HOW TO USE THIS FILE
+This file lists every exact text phrase extracted from your legacy bot system,
+organized by:
+  1. Exact Wait, Read, Typing, Pause & Disconnect Timers
+  2. What the User Can Say (Triggers & Keywords)
+  3. What the Bot Can Say (Exact Female & Male Reply Pools with Percentages)
+  4. All Weighted Stage Questions & Reactions
+
+Note: Where a phrase contains " | ", the bot splits it into 2 separate chat
+bubbles with a natural pause in between.
+
+================================================================================
+SECTION 1: ALL WAIT, READ, TYPING & DISCONNECT TIMERS
+================================================================================
+
+1.1 Opening Wait (Before Bot Speaks First When User Is Silent)
+- 16 seconds: 32.0% (weight 80)
+- 18 seconds: 20.0% (weight 50)
+- 17 seconds: 16.0% (weight 40)
+- 11 seconds: 12.0% (weight 30)
+- 15 seconds:  8.0% (weight 20)
+- 14 seconds:  4.0% (weight 10)
+- 13 seconds:  4.0% (weight 10)
+- 12 seconds:  4.0% (weight 10)
+
+1.2 Message Buffer & Read Delay (After User Sends a Message)
+- Rapid-Message Debounce Wait: 0.4 seconds (catches fast follow-up messages)
+- Base Read Delay: 1.6 to 3.4 seconds
+- Length Read Bonus: +0.045 seconds per character (capped at +2.2 seconds max)
+- Curiosity / Question / Flirt Word Bonus: +1.0 to +2.4 seconds if user text
+  contains "?" OR any of: fun, secret, intimate, love, like you, like u, kiss,
+  hug, date, marry, single, hot, cute, pretty, beautiful, sex, naughty, pic,
+  photo, why, how, what, who, where
+- Random Distraction Hesitation: 25% chance to add +1.2 to +3.0 seconds
+
+1.3 Typing Speed & Multi-Bubble Pauses
+- Typing Speed: 7.5 to 9.5 characters per second
+- Max Typing Duration Per Bubble: Capped at 2.8 seconds maximum
+- Pause Between Opening Burst Bubbles: 0.9 to 2.0 seconds
+- Pause Between Split Bubbles ("Bubble 1 | Bubble 2"): 1.2 to 2.0 seconds
+- Pause Before Follow-Up Bubble (Reaction -> Next Question): 2.2 to 4.8 seconds
+
+1.4 Idle Disconnect Countdown (When User Stops Replying)
+- Base Idle Pool: 16s (34.8%), 18s (21.7%), 17s (17.4%), 15s (8.7%),
+  14s/13s/12s/11s (4.3% each)
+- After Opening Burst: Base Idle Pool + 12s (+5s if bot asked a question)
+  -> Total: 23 to 35 seconds, then disconnect in 0.1s
+- After Normal Reply: Base Idle Pool + 12s (+30s if bot asked a question)
+  -> Total: 53 to 60 seconds (with question) OR 23 to 30 seconds (no question)
+- Male Ghoster (when no question was asked): 3.0 to 8.0 seconds, then leave
+
+1.5 Intentional Disconnect Delays (After Final Bubble or Silent Leave)
+- Standard Goodbye / Spam 3 / Dry 3 / Max Turns / Private 3: 1.0 second
+- Female Spoiler Goodbye / Bored Insistence Goodbye: 1.5 seconds
+- Female India Location Goodbye: 4.0 seconds
+- Silent Bored Insistence Leave: 2.5 to 5.5 seconds
+- Horny Silent Leave: 1.5 to 4.5 seconds
+- Male Ghoster Silent Leave: 3s (41.7%), 6s (33.3%), 10s (25.0%)
+
+================================================================================
+SECTION 2: USER SAYS NOTHING AT START (OPENING BURSTS)
+================================================================================
+
+WAIT: Opening Wait Timer (11s–18s), then 0.9s–2.0s pause between bubbles.
+BUBBLE COUNT CHANCE: 1 bubble (52.2%) | 2 bubbles (34.8%) | 3 bubbles (8.7%) | 4 bubbles (4.3%)
+
+2.1 Female Opening Burst
+- Bubble 1 (Opening Greeting — 10% native language if non-English, 90% English):
+  "Hi" (24.1% / w:35), "Hey" (20.7% / w:30), "Hello" (13.8% / w:20),
+  "Heyy" (10.3% / w:15), "Hiii" (6.9% / w:10), "Hy" (6.9% / w:10),
+  "Hlo" (6.9% / w:10), "Hii" (3.4% / w:5), "Hey there" (3.4% / w:5),
+  "Yo" (3.4% / w:5)
+- Bubble 2 (if count >= 2):
+  * 55% Gender Reveal: "F" (36.4%), "Female" (13.6%), "W" (13.6%),
+    "Girl" (13.6%), "F here" (13.6%), "Woman" (4.5%), "Im a girl" (4.5%)
+  * 45% First Stage Question (see Section 5)
+- Bubble 3 (if count >= 3): Next Stage Question (see Section 5)
+- Bubble 4 (if count == 4 — Opening Nudge):
+  "Hi" (w:35), "Sup?" (w:35), "Hey" (w:30), "U there?" (w:15), "Heyy" (w:10),
+  "Hlo" (w:10), "So" (w:10), "Hi there" (w:10), "Howdy" (w:10), "Yo" (w:5),
+  "Anyone there?" (w:5), "Helloo" (w:5), "hello" (w:5)
+
+2.2 Male Opening Burst
+- Greeting Bubble (35% chance to send before tag; 65% skip greeting):
+  "Hi" (52.2% / w:60), "Hey" (8.7% / w:10), "Hii" (8.7% / w:10),
+  "Hy" / "Hello" / "Yo" / "Heyy" / "Hlo" / "Wassuppp?" / "Wassupp?" (4.3% / w:5 each)
+- Male Opener Tag (100%):
+  "M" (30.5% / w:32), "F?" (28.6% / w:30), "F or m" (9.5% / w:10),
+  "m here" (7.6% / w:8), "F m" (4.8% / w:5), "F m?" (4.8% / w:5),
+  "M bi" (4.8% / w:5), "M 21..27" (4.8% / w:5), "Male" (4.8% / w:5)
+- Extra Bubble 2 (if count >= 2 and no "F" asked yet):
+  50% "F or m?" | 50% "F?"
+- Extra Bubble 3 (if count >= 3): "from?"
+- Extra Bubble 4 (if count == 4): Opening Nudge (same pool as above)
+
+================================================================================
+SECTION 3: COMPLETE USER-TO-BOT DIALOGUE & REPLY MATRIX
+================================================================================
+
+--------------------------------------------------------------------------------
+3.1 GREETINGS
+--------------------------------------------------------------------------------
+WHAT USER CAN SAY:
+  "hi", "hey", "hello", "hii", "heyy", "hy", "hlo", "yo", "sup", "wassup",
+  "good morning", "good evening", etc.
+
+WAIT: Standard read delay + typing (if follow-up bubble: +2.2s–4.8s pause).
+
+WHAT BOT CAN SAY:
+- If Bot ALREADY greeted earlier:
+  100% skips greeting and sends Next Stage Question (or Female safe fallback /
+  Male silent disconnect if out of questions).
+- If Bot has NOT greeted yet:
+  * 65% Replies with a Greeting:
+    - ~46% Mirrors user's exact short greeting (2–12 chars): 70% Capitalized,
+      30% lowercase.
+    - ~54% Picks a DIFFERENT greeting from Opening Greetings pool ("Hey", "Hi",
+      "Hello", "Heyy", "Hiii", "Hy", "Hlo", "Hii", "Hey there", "Yo").
+    - Follow-Up: 30% Greeting ONLY (stops); 70% sends Bubble 2 (Female asks
+      Next Stage Question; Male sends Male Opener Tag).
+  * 35% Skips Greeting Back: Jumps directly to Male Opener Tag or Female's Next
+    Stage Question.
+
+--------------------------------------------------------------------------------
+3.2 USER STATES THEIR GENDER
+--------------------------------------------------------------------------------
+WHAT USER CAN SAY:
+  "m", "male", "man", "boy", "guy", "f", "female", "woman", "girl", "w",
+  "im m", "i'm a guy", "i am female", "m here", "f u?", "m, wbu?", "male and u?"
+  (Excluded if asking "are u a girl?" or ends in "?" without bounce.)
+
+WAIT: Standard read delay + typing (+2.2s–4.8s if 2 bubbles).
+
+WHAT BOT CAN SAY:
+- If Male Ghoster (80% of Male bots):
+  * Reveals gender if not told: "M" (45%), "m" (25%), "M here" (20%), "m here" (10%).
+  * 30% Converts to Male Normal & asks a question:
+    - Name (30%): "Name", "Name?", "Ur name?", "What's ur name?", "Your name?"
+    - Country (35%): "From", "From?", "Where u from?", "U from?"
+    - Age (35%): "What is your age", "Age?", "Age", "How old?", "Ur age?"
+  * 70% Disconnects after Ghost Delay (3s: 41.7% | 6s: 33.3% | 10s: 25.0%).
+- If Female Bot (or Male Normal):
+  * Step 1 (if bot hasn't told gender yet):
+    - Female: "F" (36.4%), "Female" (13.6%), "W" (13.6%), "Girl" (13.6%),
+      "F here" (13.6%), "Woman" (4.5%), "Im a girl" (4.5%)
+    - Male: "M" (45%), "m" (25%), "M here" (20%), "m here" (10%)
+  * Step 2 (Post-Gender Follow-Up — weighted):
+    - Female Pool:
+      "Where u from?" (18.2% / w:20)
+      "From?" (13.6% / w:15)
+      "How old are you?" (13.6% / w:15)
+      "What are you doing?" (13.6% / w:15)
+      "What brings you here" (9.1% / w:10)
+      "Ohh nice | Where u from?" (9.1% / w:10)
+      "Ohh okay nice" (7.3% / w:8)
+      "Nice to meet u!" (6.4% / w:7)
+      "Cool haha | How old are u?" (4.5% / w:5)
+      "Im bored lol | Wyd rn?" (4.5% / w:5)
+    - Male Pool:
+      "From?" (21.6% / w:25)
+      "Age?" (17.2% / w:20)
+      "Oh nice | Where u from?" (12.9% / w:15)
+      "Name?" (8.6% / w:10)
+      "Cool" (8.6% / w:10)
+      "Nice" (8.6% / w:10)
+      "Are you married" (8.6% / w:10)
+      "Cool | How old are u?" (8.6% / w:10)
+      "Any gf" (2.6% / w:3)
+      "What do you want to tell me?" (2.6% / w:3)
+
+--------------------------------------------------------------------------------
+3.3 USER ASKS BOT'S GENDER
+--------------------------------------------------------------------------------
+WHAT USER CAN SAY:
+  "m or f", "f or m", "m/f", "f/m", "boy or girl", "girl or boy", "male or
+  female", "are you a girl", "r u a girl", "u f?", "girl?", "boy?", "f?", "m?",
+  "what is your gender", "gender?"
+
+WAIT: Standard read delay (+1.0s–2.4s if "?") + typing.
+
+WHAT BOT CAN SAY:
+- If already told gender: Next Stage Question or Repeat Warning ("You asked that
+  already", "Didn't I answer that", "I think I said that already", "Scroll up").
+- If user asked yes/no ("are you a girl?", "f?"):
+  * 20% Direct Yes/No Reply:
+    - Female: "yes", "yes f", "yeah f", "yes im f", "yep f" (equal chance)
+    - Male: "No m", "no im m", "nah m", "M" (equal chance)
+  * 80% Standard Gender Reply:
+    - Female: "F" (36.4%), "Female" / "W" / "Girl" / "F here" (13.6% each),
+      "Woman" / "Im a girl" (4.5% each)
+    - Male: "M" (45%), "m" (25%), "M here" (20%), "m here" (10%)
+
+--------------------------------------------------------------------------------
+3.4 USER ASKS BOT'S AGE
+--------------------------------------------------------------------------------
+WHAT USER CAN SAY:
+  "age?", "age", "how old are you", "how old r u", "ur age?", "24?" (when age
+  was not pending)
+
+WAIT: Standard read delay (+1.0s–2.4s if "?") + typing.
+
+WHAT BOT CAN SAY:
+- Female Roll: 55% Answer | 20% Evade | 25% Skip to Next Stage Question
+- Male Roll:   65% Answer | 10% Evade | 25% Skip to Next Stage Question
+- If Answer:
+  * Bot age is rolled once: 75% between 18–24, 25% between 25–30.
+  * If user's age NOT known yet: Replies with age + bounce (e.g., "21, wbu?").
+  * If user's age ALREADY known: Replies with age only (strips "wbu?") + Bubble
+    2 Next Stage Question.
+- If Evade (records Age as skipped):
+  * Female & Male: "Guess" (50%), "How old would you say?" (50%)
+  * Plus Bubble 2 Next Stage Question if user's age is already confirmed.
+
+--------------------------------------------------------------------------------
+3.5 USER TELLS THEIR AGE
+--------------------------------------------------------------------------------
+WHAT USER CAN SAY:
+  "18" through "50" (in new AI: 18–80), "im 24", "i'm 22", "i am 30", "age 25",
+  "my age is 21", "24 yo", "24 yrs", "24 years old", "24 wbu", "im 23, u?"
+
+WAIT: Standard read delay + typing (+2.2s–4.8s if 2 bubbles).
+
+WHAT BOT CAN SAY:
+- If trailing bounce ("im 24 wbu"): Confirms user age, then answers Bot's Age
+  (Section 3.4).
+- Female Bot (no bounce):
+  * 35% Skips reaction and jumps straight to Next Stage Question (Age-Branch).
+  * 65% Reacts first:
+    - User 18–25 (Young): "Ok" (53.8% / w:35), "cool" (30.8% / w:20),
+      "Nicee" (15.4% / w:10)
+    - User 26+ (Older): "{age}, nice" (42.1% / w:40), "Ok" (36.8% / w:35),
+      "Oh {age} nice" (10.5% / w:10), "Cool" (10.5% / w:10)
+    - 35% chance (if not said yet) appends ", Nice to meet u btw!" / ", Nice
+      meeting u!" / ", Nice meeting u here!" / ", Nice to meet u haha".
+  * Next Question (100% after Age):
+    - 45% Merges into 1 bubble ("Ok. How are you?").
+    - 55% Sends as Bubble 2 after 2.2s–4.8s pause.
+- Male Normal Bot (no bounce):
+  * 45% Acknowledgment ("Cool", "Nice", "Oh nice", "Ok") + Bubble 2 Next Q.
+  * 55% Sends Next Stage Question directly.
+
+--------------------------------------------------------------------------------
+3.6 USER ASKS BOT'S COUNTRY / LOCATION
+--------------------------------------------------------------------------------
+WHAT USER CAN SAY:
+  "from?", "u from?", "you from?", "and u from?", "where are you from",
+  "where r u from", "where u from", "where do you live", "tunisia?" (when
+  country was not pending)
+
+WAIT: Standard read delay (+1.0s–2.4s) + typing (+4.0s disconnect if Female India).
+
+WHAT BOT CAN SAY:
+- Female Roll: 50% Answer | 30% Evade | 20% Skip to Next Stage Question
+- Male Roll:   60% Answer |  5% Evade | 35% Skip to Next Stage Question
+- If Female Answers:
+  * Country Roll: Indonesia (41.7% / w:50), India (25.0% / w:30),
+    Philippines (16.7% / w:20), Turkish (16.7% / w:20)
+  * If India -> SPECIAL DISCONNECT:
+    - Bubble 1: "India" (50%) or "From India" (50%)
+    - Bubble 2 (after 2.2s–4.8s): "Sorry looking for Indian guys", "I'm looking
+      for guys from here", "Sry looking for someone from India", "Looking for
+      local guys sry", "Just looking for guys from my country", "Sorry I want
+      to talk to Indian guys"
+    - Disconnects after 4.0 seconds.
+  * Other Countries: "{country}", "I'm from {country}", "Im from {country}",
+    "From {country}" (25% each) + Bubble 2 Next Stage Question.
+- If Male Answers:
+  * Country Roll: India (66.7% / w:40), Canada (33.3% / w:20)
+  * Templates: "I'm from {country}", "Im from {country}", "{country}",
+    "from {country}" (25% each) + Bubble 2 Next Stage Question.
+- If Evade (records Country as skipped):
+  * Female: "Guess", "Take a guess", "Not telling", "You tell me", "Guess first"
+    (20% each). If user's country unknown, appends ", Where u from?" / ", From?".
+  * Male: "Guess" (50%), "Where would you say?" (50%) + Bubble 2 Next Stage Q.
+
+--------------------------------------------------------------------------------
+3.7 USER TELLS THEIR COUNTRY OR CITY
+--------------------------------------------------------------------------------
+WHAT USER CAN SAY:
+  Any country name, OR extra states/cities: california, texas, florida, new
+  york, ontario, toronto, vancouver, mumbai, delhi, bangalore, kerala, punjab,
+  jakarta, bali, manila, cebu, istanbul, ankara, dubai, london (with or without
+  "im from", "u?", "wbu").
+
+WAIT: Standard read delay + typing (+2.2s–4.8s if 2 bubbles).
+
+WHAT BOT CAN SAY:
+- If trailing bounce ("tunis u"): Confirms country, then answers Bot's Country
+  (Section 3.6).
+- Female Reaction (65% reacts, 35% skips straight to next question):
+  "Oh {country} nice", "Ahh cool", "Ohh okay", "{country}, gotcha", "Nicee",
+  "Oh thats cool" (equal chance) + 35% chance proactive "Nice to meet u".
+- Male Reaction: 45% "Cool"/"Nice"/"Oh nice"/"Ok" + Next Q; 55% Next Q directly.
+- Special Next Question Rule (BOTH Female & Male):
+  * 5% chance to ask State/City: "State?", "Which state?", "What state?",
+    "Which part?" (25% each).
+  * 95% chance to ask normal Next Stage Question (Female has 80% pace chance
+    when she reacted, 45% chance to merge into 1 bubble).
+
+--------------------------------------------------------------------------------
+3.8 USER ASKS BOT'S STATE OR CITY
+--------------------------------------------------------------------------------
+WHAT USER CAN SAY:
+  "state?", "city?", "which state", "what state", "which city", "what city",
+  "which part", "what province", "where in indonesia", "ur state", "your city"
+
+WAIT: Standard read delay (+1.0s–2.4s) + typing.
+
+WHAT BOT CAN SAY:
+- 1st Ask: 35% Tell Matching City/State | 65% Deflect or Skip
+- 2nd Ask / User Insists: 45% Tell Matching City/State | 55% Deflect or Skip
+- If Tells City (always matches bot's country):
+  * Indonesia: "Jakarta", "Bali", "Bandung", "Surabaya"
+  * Philippines: "Manila", "Cebu", "Davao", "Quezon"
+  * Turkish: "Istanbul", "Ankara", "Izmir", "Antalya"
+  * India: "Mumbai", "Delhi", "Bangalore", "Kerala"
+  * Canada: "Ontario", "Toronto", "Vancouver", "Montreal"
+  * Plus Bubble 2 Next Stage Question.
+- If Deflects (45% on 1st ask, 100% on 2nd/insist; remainder skips to Next Q):
+  * Female: "It's a secret", "Not sharing my city on here", "Guess",
+    "Rather not say my city", "Take a guess" (20% each)
+  * Male: "It's a secret", "Guess", "Not sharing my exact city",
+    "Rather not say", "Take a guess" (20% each)
+  * Plus 60% chance Bubble 2 Next Stage Question.
+
+--------------------------------------------------------------------------------
+3.9 USER ASKS "HOW ARE YOU?" OR "WHAT ARE YOU DOING?" (STEP 3 HRU / WYD)
+--------------------------------------------------------------------------------
+WHAT USER CAN SAY:
+  "hru", "hr u", "how are you", "how r u", "how are ya", "how's it going",
+  "how is it going", "how u doing", "how are you doing", "wyd", "what are you
+  doing", "what r u doing", "what u doing", "what's up", "wassup"
+
+WAIT: Standard read delay (+1.0s–2.4s) + typing.
+
+WHAT BOT CAN SAY:
+- Female Roll: 60% Answer | 15% Evade | 25% Skip to Next Stage Question
+- Male Roll:   55% Answer | 10% Evade | 35% Skip to Next Stage Question
+- If Answer — Case 1 (User ALREADY told how they are, e.g., "Im doing well wbu"):
+  * 50% Reciprocal Reply (Female & Male):
+    "Same", "Fine", "Gud", "Same here", "Good", "Well"
+  * 50% Standard Mood Answer:
+    - Female: "I'm good", "Just chilling in bed", "Nothing much, just bored",
+      "Doing good"
+    - Male: "Good", "I'm good", "Just chilling", "Nothing much, bored"
+  * Followed by Bubble 2 Next Stage Question.
+- If Answer — Case 2 (User has NOT said how they are yet, e.g., asked "hru?" first):
+  * 55% Bounce-Back Reply (sets Mood/Doing pending for user):
+    - Female: "Good, u?", "Fine, u?", "Im good, wbu?", "Good", "Fine", "Gud"
+    - Male: "Good u?", "Fine u?", "Good, wbu?", "Good", "Fine", "Gud"
+  * 45% Standard Mood Answer (above) + Bubble 2 Next Stage Question.
+- If Evade (records Doing as skipped):
+  * Female: "Nothing much", "Same old", "Just taking it easy"
+  * Male: "Can't complain", "Same old", "Just taking it easy"
+
+--------------------------------------------------------------------------------
+3.10 USER TELLS MOOD OR WHAT THEY ARE DOING
+--------------------------------------------------------------------------------
+WHAT USER CAN SAY:
+  "good", "fine", "great", "okay", "alright", "well", "amazing", "cool", "nice",
+  "not bad", "so so", "chill", "chilling", "relaxing", "nothing", "nm", "nmu",
+  "bored", "laying", "lying", "in bed", "resting", "sleeping", "tired",
+  "watching", "movie", "series", "netflix", "youtube", "music", "gaming",
+  "playing", "reading", "scrolling", "working", "studying", "cooking", "eating",
+  "coffee", "tea", "walking", "outside", "gym", "home"
+
+WAIT: Standard read delay + typing.
+
+WHAT BOT CAN SAY:
+- If trailing bounce ("Im doing well wbu", "fine u?"): Confirms mood, then runs
+  Section 3.9 Case 1 (or if bot already answered earlier, sends brief reciprocal
+  "Same" / "Fine" / "Good" / "Same here").
+- Female Reaction (65% reacts, 35% skips to Next Stage Q):
+  "That's cool" (w:30), "Ohh nice" (w:20), "Cool" (w:20), "Sounds good" (w:15),
+  "Not bad" (w:15), "Nicee" (w:10), "I see" (w:10), "Oh really" (w:5)
+  + 80% Next Stage Question (45% merged into 1 bubble, 55% Bubble 2).
+
+--------------------------------------------------------------------------------
+3.11 USER ASKS BOT'S NAME
+--------------------------------------------------------------------------------
+WHAT USER CAN SAY:
+  "what's your name", "what is your name", "ur name", "your name", "name?"
+
+WAIT: Standard read delay (+1.0s–2.4s) + typing.
+
+WHAT BOT CAN SAY:
+- Female Roll: 0% Real Name | 45% Deflect | 55% Skip to Next Stage Question
+  * Female Deflect Pool: "Not sharing my name on here", "It's a secret",
+    "Rather not say", "Too soon for names", "I keep my name private here",
+    "Maybe later" + Bubble 2 Next Stage Question.
+- Male Roll: 35% Gives Name | 15% Evade | 50% Skip to Next Stage Question
+  * Male Name Pool: Rahul, Vihaan, Reyansh, Siddharth, Vikram, Karan, Sam
+  * Male Templates: "im {name}", "I'm {name}", "{name}", "{name} here" + Next Q
+  * Male Evade Pool: "Maybe later", "Not telling just yet" + Next Q
+
+--------------------------------------------------------------------------------
+3.12 USER ASKS "LOOKING FOR?" / JOB / MARRIED / SECRET (DIRECT OR BOUNCE)
+--------------------------------------------------------------------------------
+WHAT USER CAN SAY:
+  - Looking For: "looking for", "what brings you here", "why are you here"
+  - Bounce-Back ("u?", "wbu?", "hbu?", "and you?", "yours?") right after bot
+    asked Job, Relationship, Looking For, or Secret.
+
+WHAT BOT CAN SAY:
+- Looking For (Female: 55% Ans / 25% Evade / 20% Skip | Male: 50% / 15% / 35%):
+  * Female Ans: "Just chatting and meeting new people", "Just bored looking to
+    chat", "Making friends, maybe more if we vibe", "Someone nice to talk to"
+  * Male Ans: "Just chatting", "Looking for someone cool to chat with", "Just
+    bored here", "Meeting new people"
+  * Female Evade: "Just seeing how things go", "Depends on the vibe", "Haven't
+    really decided"
+  * Male Evade: "Just seeing how it goes", "Haven't really decided", "Depends
+    who I meet"
+- Job / Study (Female: 55% Ans / 20% Evade / 25% Skip | Male: 55% / 15% / 30%):
+  * Female Ans: "I'm a student", "Studying", "In college rn"
+  * Male Ans: "Working", "I'm a student", "In college"
+  * Female Evade: "A bit of this and that", "Nothing too interesting", "I'd
+    rather not get into that"
+  * Male Evade: "A bit of this and that", "Nothing too exciting"
+- Relationship / Married (Female: 65% / 15% / 20% | Male: 70% / 10% / 20%):
+  * Female & Male Ans: "I'm single", "Single", "Not married"
+  * Female & Male Evade: "Why do you ask?", "What makes you ask?", "Why, are
+    you asking?"
+- Secret / Intimate (Female: 0% Ans / 65% Evade / 35% Skip | Male: 0% / 50% / 50%):
+  * Female: "I asked you first", "It's a secret", "You tell me first", "You
+    first", "Rather not say", "Let's leave that one"
+  * Male: "You tell me first", "It's a secret", "Not telling", "You first",
+    "Rather not say", "Let's leave that one"
+
+--------------------------------------------------------------------------------
+3.13 "NICE TO MEET YOU"
+--------------------------------------------------------------------------------
+WHAT USER CAN SAY:
+  "nice to meet you", "nice to meet u", "nice to meet ya", "glad to meet u",
+  "pleasure meeting you"
+
+WAIT: Standard read delay + typing (+2.2s–4.8s if follow-up bubble).
+
+WHAT BOT CAN SAY:
+- Reply Pool (weighted):
+  "Nice to meet u too" (33.3% / w:25), "nice to meet u!" (26.7% / w:20),
+  "Nice to meet u too!" (13.3% / w:10), "Aww, nice to meet u!" (13.3% / w:10),
+  "Nice to meet u" (13.3% / w:10)
+- Follow-Up: 70% chance sends Next Stage Question as Bubble 2.
+
+--------------------------------------------------------------------------------
+3.14 PRIVATE CHAT / SOCIAL ID REQUESTS
+--------------------------------------------------------------------------------
+WHAT USER CAN SAY:
+  "come private", "chat private", "go private", "private chat", "dm me",
+  "pm me", "text me on", "give me ur id / tg / telegram / insta / ig / snap /
+  number / whatsapp", "whats ur insta", "drop ur snap", "can i dm u"
+
+WAIT: Standard read delay + typing (Disconnect in 1.0s on 3rd strike).
+
+WHAT BOT CAN SAY:
+- Strike 1 Roll: 10% Annoyed | 65% Stay Here | 25% Maybe Later (+55% Next Q)
+- Strike 2: 100% Annoyed (+55% Next Q)
+- Strike 3: 100% Annoyed + DISCONNECT in 1.0s
+- Stay Here Pool (weighted):
+  "Let's chat here" (w:40), "We can talk here" (w:40), "Not sharing my ID"
+  (w:40), "I prefer here" (w:30), "I'm good here" (w:25), "Here is fine" (w:20),
+  "This chat is fine" (w:20), "Nah here is better" (w:10), "Here works for me"
+  (w:10), "I'm staying here" (w:5), "Rather stay anonymous" (w:5)
+- Maybe Later Pool (weighted):
+  "Idk maybe later" (w:40), "Maybe if we vibe" (w:30), "Not rn" (w:30), "Not
+  yet" (w:20), "A bit too soon" (w:20), "We just matched" (w:20), "Hmm" (w:20),
+  "Maybe, let's see" / "Let's see first" / "Not that fast" / "Maybe after some
+  chatting" / "Let's take it slow" / "Hmm maybe" / "We barely know each other" /
+  "Let's see how it goes" / "Who knows" (w:10 each)
+- Annoyed Pool (weighted):
+  "Can we just chat here" (w:45), "Not giving out my ID" (w:30), "Just chat here
+  pls" (w:20), "Why so fast" (w:10), "Already asking for my ID?" / "Bro we just
+  matched" / "I said here" / "I'm not comfortable with that" / "Nope, not
+  sharing" (w:5 each)
+
+--------------------------------------------------------------------------------
+3.15 USER INSISTS ("ANSWER ME" / "YOU IGNORED ME")
+--------------------------------------------------------------------------------
+WHAT USER CAN SAY:
+  "you don't answer me", "u didn't reply", "why won't you tell me", "please
+  answer my question", "answer first", "reply to me", "you ignored me",
+  "you dodged my question", "i asked you first", "tell me yours", "what about
+  my question", "and mine?"
+
+WAIT: Standard read delay + typing (Bored disconnect: 2.5s–5.5s silent or 1.5s bye).
+
+WHAT BOT CAN SAY:
+- Strike 1:
+  * 80% Replies:
+    - If a skipped topic exists -> Forces answer to that topic, with 45% chance
+      to add an apology prefix:
+      Female: "Oh sry haha,", "My bad lol,", "Oh haha"
+      Male: "Oh sry,", "My bad,", "Oh"
+    - If no skipped topic -> Deflects + 45% chance Next Stage Question:
+      Female: "What didn't I answer?", "Wait what did you ask?", "Wdym?",
+      "I did answer", "Chill", "Huh? What question?"
+      Male: "What?", "Wdym", "What did u ask", "I did lol", "Chill"
+  * 20% Ignores/Skips (20% silent/bored leave, 35% Next Q, 45% stay silent).
+- Strike 2:
+  * 25% Forces answer to skipped topic (no apology).
+  * Else 75% skip/leave (55% bored disconnect, 35% Next Q, 10% silent).
+  * Else 25% Pushback:
+    - Female: "U ask too much lol", "Chill why are u mad haha", "Relax lol",
+      "Stop complaining haha", "Idk what u want me to say lol"
+    - Male: "Chill bro", "Relax", "Why u mad", "U talk too much"
+- Strike 3:
+  * 85% Silent Disconnect (2.5s–5.5s)
+  * 15% Bored Goodbye + Disconnect (1.5s):
+    - Female: "Alright im out, bye", "U complain too much lol bye", "Too
+      dramatic lol bye", "Okay bye", "Im gonna skip, bye"
+    - Male: "Bye", "Ok bye", "Cya"
+
+--------------------------------------------------------------------------------
+3.16 PURE QUESTION MARKS
+--------------------------------------------------------------------------------
+WHAT USER CAN SAY:
+  "?", "??", "???", "????", "?????"
+
+WAIT: Standard read delay (+1.0s–2.4s) + typing.
+
+WHAT BOT CAN SAY:
+- Streak 1:
+  * If a skipped question exists -> 50% chance answers skipped topic now!
+  * Otherwise -> 65% skip/ignore/leave (10% disconnect, 35% Next Q, 55% silent)
+    OR 35% Confused reply ("Huh?", "Wdym?", "Wait what lol", "What do u mean?",
+    "I dont get it haha", "How so?").
+- Streak 2:
+  * 85% skip/ignore/leave (25% disconnect, 35% Next Q, 40% silent).
+  * 15% Annoyed Reply: "What??", "Use words lol", "Why keep sending ?", "?",
+    "Huh?"
+- Streak 3+:
+  * 75% Bored Disconnect (85% silent 2.5s–5.5s, 15% bored bye 1.5s).
+  * 25% Next Stage Question or Stay Silent.
+
+--------------------------------------------------------------------------------
+3.17 SHORT TOKENS: CONFUSED, DRY, YES, NO
+--------------------------------------------------------------------------------
+WHAT USER CAN SAY:
+  - Confused: "huh", "what", "wtf", "wut", "han", "bruh", "nor what", "think"
+  - Dry: "ok", "oko", "k", "kk", "hm", "hmm", "umm", "gt", "idk", "idc", "..."
+  - Yes: "yes", "yeah", "yep", "yup", "ya", "sure", "si", "oui"
+  - No: "no", "nah", "nope", "non", "not really", "nothing", "none", "nada"
+
+WAIT: Standard read delay + typing (Disconnect in 1.0s on Dry Strike 3).
+
+WHAT BOT CAN SAY:
+- Confused: "Huh?", "Wdym?", "Wait what lol", "What do u mean?", "I dont get it
+  haha", "How so?"
+- Dry (No Pending Question):
+  * Dry 1: "Just {word}? haha", "Anything else? lol", "Ohh okay, and?",
+    "Haha thats all?", "Tell me a bit more"
+  * Dry 2: "You're quiet", "Not much to say?", "I'm listening",
+    "Anything else?", "Come on", "Okay then"
+  * Dry 3: "Alright bye", "Okay im off", "Ill leave u to it, bye", "Guess thats
+    it then, bye", "Okay cya", "Im gonna skip, take care" -> DISCONNECT 1.0s
+- Dry (With Female Pending Question):
+  * Dry 1–2: Topic-specific dry reply (e.g., "Ohh", "Okay", "I see", "Cool",
+    "Alright", "Okee", "No worries", "Hmm").
+  * Dry 3: Same Dry 3 Goodbye -> DISCONNECT 1.0s.
+- Generic No (No Pending Question):
+  "Oh okay", "Ahh fair enough", "Haha alright", "Gotcha", "No worries",
+  "I see lol"
+- Yes / No (With Female Pending Question):
+  Replies from topic's yes/no reaction pool + 75% chance Next Stage Question.
+
+--------------------------------------------------------------------------------
+3.18 MEDIA (PHOTOS, VIDEOS, SPOILERS, VOICE, STICKERS, GIFS)
+--------------------------------------------------------------------------------
+WHAT USER CAN SAY / SEND:
+  Photo, Video, Spoiler Photo/Video, Voice Note, Audio, Sticker, GIF, Video Note
+
+WAIT: Standard read delay + typing (Disconnect: 1.0s Male spoiler / 1.5s Female
+      spoiler).
+
+WHAT BOT CAN SAY:
+- Streak 2: 60% Silent | 25% Next Stage Q | 15% Short Reaction
+  * Female: "Ow haha", "ohh", "Why", "What", "uhh", "Hmm", "Hmmm"
+  * Male: "Ohh", "Uhh", "Oh", "Why", "What"
+- Streak 3+: 100% Silent.
+- Streak 1:
+  * Spoiler:
+    - Male: 40% Silent Disconnect (1.0s) | 60% "Uhh", "Wtf", "Ohh", "Why", "What"
+    - Female: 35% Bye + Disconnect (1.5s) ("Hmm", "Hum", "aww", "Ew wtf", "Why",
+      "What", "Uhh no thanks bye", "Im not opening that lol bye"); else 60%
+      Silent / 40% "Hmm", "Haha", "Ohh", "Why", "What", "why is it blurred? 🙈"
+  * Photo / Video (Visual):
+    - Male: 35% Skip to Next Q | 65% ("Nice", "Cool", "Oh nice", "Why", "What")
+      + Next Stage Q
+    - Female: 20% Silent | 25% Skip to Next Q | 55% Reaction:
+      (Turns 1–3 first pic: "Ohh", "Oh", "Haha", "Why", "What", "Nice", "Cool";
+      Later turns: "oh nice!", "Haha", "Ow haha", "Cool")
+  * Voice / Audio:
+    - Male: 40% Silent | 60% "ohh", "Ohhh", "Why", "What"
+    - Female: 25% Silent | 75% "Oh", "Ohh", "Why", "What", "Ow haha", "Haha"
+  * Sticker / GIF:
+    - Male: 35% Silent | 40% Skip to Next Q | 25% "Lol", "Haha", "Nice",
+      "Humm", "Why", "What"
+    - Female: 30% Silent | 35% Skip to Next Q | 35% "Haha", "Lol", "Oh", "Why",
+      "What"
+  * Female Pending-Question Nudge (non-spoiler): 35% appends ", You didn't
+    answer me", ", Why", ", What", ", Tell me first", ", Don't dodge my
+    question", ", You still didn't answer". Otherwise 50% chance Bubble 2 Next Q.
+
+--------------------------------------------------------------------------------
+3.19 HORNY PROMPTS
+--------------------------------------------------------------------------------
+WHAT USER CAN SAY:
+  "horny", "h0rny", "horny wbu", "horny u?"
+
+WAIT: Standard read delay + typing (Silent leave: 1.5s–4.5s; Female bye: 1.0s).
+
+WHAT BOT CAN SAY:
+- Strike 1 (Male Bot):
+  * 25% Skip to Next Stage Question
+  * 20% Silent Disconnect (2.0s–4.5s)
+  * 55% Reply: "Im a man", "Im into females", "Im into girls", "Im a guy bro",
+    "Bro im M", "Not into guys"
+    - If user confirmed Male: 50% chance Disconnect (2.0s–4.0s).
+    - Otherwise: 45% chance Bubble 2 Next Stage Question.
+- Strike 1 (Female Bot):
+  * 25% Skip to Next Stage Question
+  * 10% Silent pause -> Next Stage Question (or Silent)
+  * 65% Reply: "Not really", "A little maybe", "Not rn", "Depends", "Not in the
+    mood" (plus "Why, are you?" only if user asked without stating themselves)
+    + 50% chance Bubble 2 Next Stage Question.
+- Strike 2: Male 65% Silent Disconnect (1.5s–3.5s); Female Next Q or Repeat-2.
+- Strike 3: Male Silent Disconnect (1.5s–3.0s); Female Repeat-3 Bye (1.0s).
+
+--------------------------------------------------------------------------------
+3.20 REPEATS, MAX TURNS, BAD ENGLISH, FALLBACKS & GIFTS
+--------------------------------------------------------------------------------
+- Same Topic / Intent Repeated 2nd Time:
+  "You asked that already", "Didn't I answer that", "I think I said that
+  already", "Scroll up"
+- Same Message Repeated 3 Times (DISCONNECT 1.0s):
+  "Same question again, bye", "I'm gonna skip now, bye", "Alright I'm out, bye"
+- Max Turns Reached (14–18 Turns — DISCONNECT 1.0s, weighted):
+  "Bye" (w:15), "Byee" (w:12), "Just leave me alone" (w:10), "Cya" (w:8),
+  "Gtg" (w:7), "Byeee" / "Leave me alone" / "I don't wanna talk anymore" /
+  "Please stop messaging me" / "I'm done talking" (w:5 each), "Night" /
+  "Alright bye" (w:4 each), "Bye :)" / "Okay byee" / "Gotta run" / "Byee :)"
+  (w:3 each)
+- Female "Bad English" Check (25% on 2nd retry of Job/Doing OR 15% fallback at
+  Turn >= 5, max once per chat):
+  "U speak english?" (w:20), "Is english ur first language?" (w:20), "U speak a
+  little english?" (w:20), "Are u fluent in english?" (w:20), "U fluent in
+  english?" (w:20), "Wait do u understand me lol" (w:15), "U understand
+  english?" (w:5), "Ur english ok?" (w:5), "Sry if my english is confusing lol"
+  (w:5)
+- Female Safe Fallbacks (When All Stage Questions Exhausted):
+  "Ow haha", "Fr?", "Oh really?", "Haha nice", "Ohh okay", "Tell me more",
+  "I see lol", "Oh thats cool"
+- Virtual Gift Received by Bot:
+  "Omg thank u so much for the {emoji}!! That's so sweet of u ❤️"
+
+================================================================================
+SECTION 4: COMPLETE CATALOG OF BOT STAGE QUESTIONS (EXACT WEIGHTS)
+================================================================================
+
+4.1 Female Bot Ordered Stage Questions
+1. Mood / Doing:
+   "How are you" (w:30), "Hru?" (w:30), "How are you?" (w:25), "What are you
+   doing?" (w:20), "Wyd?" (w:20), "Wyd" (w:10), "Wyd here" (w:10), "Hru" (w:10),
+   "What r u doing?" (w:10), "How are u?" (w:5)
+2. Country / From:
+   "From" (w:40), "From?" (w:30), "Where u from?" (w:20), "U from?" (w:15),
+   "Where r u from?" (w:10), "Where are you from" (w:5), "Where are u from?"
+   (w:2), "Where do u live?" (w:2), "Which country u from?" (w:2), "Where are
+   you located?" (w:1)
+3. Age:
+   "Age" (w:45), "How old are you" (w:30), "Age?" (w:30), "Ur age?" (w:20),
+   "How old are u?" (w:5), "how old r u?" (w:5), "how old r uuu?" (w:5)
+4. Age-Branch Follow-Up (Triggers automatically after user's age is confirmed):
+   * Young (18–25): "Ok" (w:30), "U watch anime?" (w:5), "Fav movie?" (w:5),
+     "U play games?" (w:5) [+ shared doing questions if not asked yet]
+   * Older (26+): "What u into?" (w:30), "how's it going?" (w:15), "Wyd rn?"
+     (w:15), "How's ur day been?" (w:12), "You been busy?" (w:8),
+     "Just chilling?" (w:8), "Can't sleep?" (w:5) [+ shared doing if not asked]
+5. Job / Study:
+   "Where do u work?" (w:40), "What do u do?" (w:30), "what do u do?" (w:25),
+   "U studying or working?" (w:20), "U work or study?" (w:20), "Working or
+   studying?" (w:20), "Still studying or working?" (w:15), "Got a job or
+   studying?" (w:15), "Are u a student?" (w:5), "Are u in college?" (w:5)
+6. Relationship / Married:
+   "single?" (w:30), "married?" (w:30), "Do u have a gf?" (w:30), "U married?"
+   (w:25), "Married or single" (w:20), "Single or in a relationship?" (w:15),
+   "Are you seeing anyone or single?" (w:15), "Are you single or married?"
+   (w:10), "Do u have a gf or single?" (w:5)
+7. Looking For:
+   "What are u looking for?" (w:30), "What brings u to this chat?" (w:25),
+   "What brings u here?" (w:20), "U looking for" (w:10), "So, what brings u
+   here?" (w:10)
+8. Secret / Intimate:
+   "Tell me a fun fact about yourself" (w:20), "What's your type?" (w:20),
+   "Tell me a secret" (w:15), "Come on, tell me a secret " (w:15)
+
+4.2 Male Normal Bot Ordered Stage Questions
+1. Name (80% chance SKIPPED completely):
+   "Your name?" (w:40), "Name" (w:20), "Ur name?" (w:20), "Name?" (w:5),
+   "What's ur name?" (w:5)
+2. Country / From:
+   "From" (w:35), "From?" (w:30), "Where u from?" (w:5), "U from?" (w:5)
+3. Age:
+   "Age" (w:40), "Age?" (w:35), "How old?" (w:20), "Ur age?" (w:15),
+   "What is your age" (w:5)
+
+================================================================================
+END OF DIALOGUE & PERCENTAGE MAP
+================================================================================

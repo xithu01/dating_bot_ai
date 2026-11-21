@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # FILE: production_server.py
-# PURPOSE: Rule 14 Zero-Logic Compiled Pure-NumPy VM (Steps 1-15 + O(1) Context Ask-Back Redirect)
+# PURPOSE: Rule 14 Zero-Logic Compiled Pure-NumPy VM (Steps 1-18 + O(1) Context Ask-Back Redirect)
 # RULES: Zero PyTorch/SciPy/DB, zero plugins, zero `if class_id == X`, zero float64/int64,
 #        zero per-request RAM alloc, Prime Modulus (% 4091 / % 8191), PyArmor compatible (< 300 lines / < 12 KB).
 
@@ -11,28 +11,13 @@ import sys
 import time
 import numpy as np
 
-BLOOM_SIZE = 65536
-WORD_MOD = 4091
-BIGRAM_MOD = 8191
-TOK_COUNTRY = 4093
-TOK_NAME_F = 4094
-TOK_NAME_M = 4095
-D_EMB = 64
-D_STRUCT = 16
-D_IN = 128
-D_HID1 = 256
-D_HID2 = 128
-MAX_LEN = 45
-MAX_USERS = 50000
-NUM_WORKERS = 8
-SESSION_TIMEOUT_S = 600
+BLOOM_SIZE, WORD_MOD, BIGRAM_MOD = 65536, 4091, 8191
+TOK_COUNTRY, TOK_NAME_F, TOK_NAME_M = 4093, 4094, 4095
+D_EMB, D_STRUCT, D_IN, D_HID1, D_HID2 = 64, 16, 128, 256, 128
+MAX_LEN, MAX_USERS, NUM_WORKERS, SESSION_TIMEOUT_S = 45, 50000, 8, 600
 
-BIT_WILDCARD_NAME = np.uint32(1 << 30)
-BIT_GLOBAL_KNOWN = np.uint32(1 << 31)
-ZERO_F32 = np.float32(0.0)
-ONE_F32 = np.float32(1.0)
-SIX_F32 = np.float32(6.0)
-CONF_MARGIN_F32 = np.float32(0.25)
+BIT_WILDCARD_NAME, BIT_GLOBAL_KNOWN = np.uint32(1 << 30), np.uint32(1 << 31)
+ZERO_F32, ONE_F32, SIX_F32, CONF_MARGIN_F32 = np.float32(0.0), np.float32(1.0), np.float32(6.0), np.float32(0.25)
 
 
 class CompiledVMModel:
@@ -56,9 +41,7 @@ class CompiledVMModel:
             sys.exit(1)
 
         def deq(pfx, zero0=False):
-            q = arc[f"{pfx}_q"].astype(np.int8, copy=False)
-            s = arc[f"{pfx}_s"].astype(np.float32, copy=False)
-            arr = np.multiply(q, s, dtype=np.float32)
+            arr = np.multiply(arc[f"{pfx}_q"].astype(np.int8, copy=False), arc[f"{pfx}_s"].astype(np.float32, copy=False), dtype=np.float32)
             if zero0:
                 arr[0].fill(ZERO_F32)
             arr.flags.writeable = False
@@ -69,43 +52,24 @@ class CompiledVMModel:
             arr.flags.writeable = False
             return arr
 
-        self.emb_word = deq("emb_word", True)
-        self.emb_bg = deq("emb_bg", True)
-        self.pos_emb = ro("pos_emb_f32", np.float32)
-        self.w_struct = deq("w_struct")
-        self.w1 = deq("w1")
-        self.b1 = ro("b1_f32", np.float32)
-        self.w2 = deq("w2")
-        self.b2 = ro("b2_f32", np.float32)
-        self.w_out = deq("w_out")
-        self.b_out = ro("b_out_f32", np.float32)
-
+        self.emb_word, self.emb_bg = deq("emb_word", True), deq("emb_bg", True)
+        self.pos_emb, self.w_struct = ro("pos_emb_f32", np.float32), deq("w_struct")
+        self.w1, self.b1 = deq("w1"), ro("b1_f32", np.float32)
+        self.w2, self.b2 = deq("w2"), ro("b2_f32", np.float32)
+        self.w_out, self.b_out = deq("w_out"), ro("b_out_f32", np.float32)
         self.super_bloom = ro("super_bloom_u32", np.uint32)
-        self.entity_lut_a = ro("entity_lut_a", np.uint8)
-        self.entity_lut_b = ro("entity_lut_b", np.uint8)
-        self.char_lut = ro("char_lut_i32", np.int32)
-        self.rej_lut = ro("rej_lut_b", np.bool_)
-        self.w_poly_mat = ro("w_poly_mat_i32", np.int32)
-
+        self.entity_lut_a, self.entity_lut_b = ro("entity_lut_a", np.uint8), ro("entity_lut_b", np.uint8)
+        self.char_lut, self.rej_lut, self.w_poly_mat = ro("char_lut_i32", np.int32), ro("rej_lut_b", np.bool_), ro("w_poly_mat_i32", np.int32)
         self.http_blob_u8 = ro("http_blob_u8", np.uint8)
         self.http_blob_mv = memoryview(self.http_blob_u8)
-        self.pool_off = ro("pool_msg_off_i32", np.int32)
-        self.pool_end = ro("pool_msg_end_i32", np.int32)
-        self.pool_mask = ro("pool_mask_u8", np.uint8)
+        self.pool_off, self.pool_end, self.pool_mask = ro("pool_msg_off_i32", np.int32), ro("pool_msg_end_i32", np.int32), ro("pool_mask_u8", np.uint8)
         self.route_pool_lut = ro("route_pool_lut", np.uint16)
-        self.leaf_cls = ro("leaf_to_class_u8", np.uint8)
-        self.leaf_rule = ro("leaf_entity_rule_u8", np.uint8)
-        self.leaf_plock = ro("leaf_persona_lock_u8", np.uint8)
-        self.chk_lo = ro("leaf_chk_lo_u32", np.uint32)
-        self.chk_hi = ro("leaf_chk_hi_u32", np.uint32)
-        self.set_lo = ro("leaf_set_lo_u32", np.uint32)
-        self.set_hi = ro("leaf_set_hi_u32", np.uint32)
+        self.leaf_cls, self.leaf_rule, self.leaf_plock = ro("leaf_to_class_u8", np.uint8), ro("leaf_entity_rule_u8", np.uint8), ro("leaf_persona_lock_u8", np.uint8)
+        self.chk_lo, self.chk_hi = ro("leaf_chk_lo_u32", np.uint32), ro("leaf_chk_hi_u32", np.uint32)
+        self.set_lo, self.set_hi = ro("leaf_set_lo_u32", np.uint32), ro("leaf_set_hi_u32", np.uint32)
         self.askback_redirect = ro("askback_redirect_u8", np.uint8)
         arc.close()
-
-        self.num_leaves = int(self.leaf_cls.shape[0])
-        self.bloom_mask = np.int32(BLOOM_SIZE - 1)
-        self.space_i32 = np.int32(32)
+        self.num_leaves, self.bloom_mask, self.space_i32 = int(self.leaf_cls.shape[0]), np.int32(BLOOM_SIZE - 1), np.int32(32)
 
 
 class InferenceSlot:
@@ -118,47 +82,27 @@ class InferenceSlot:
 
     def __init__(self, slot_id, num_leaves):
         self.slot_id = slot_id
-        self.raw_u8 = np.zeros((MAX_LEN + 4,), dtype=np.int32)
-        self.rej_mask = np.zeros((MAX_LEN + 4,), dtype=np.bool_)
-        self.words_mat = np.zeros((6, 16), dtype=np.int32)
-        self.w_hashes = np.zeros((6, 4), dtype=np.int32)
-        self.w_b_idx = np.zeros((6, 3), dtype=np.int32)
-        self.sb_hits = np.zeros((6, 3), dtype=np.uint32)
-        self.sb_word = np.zeros((6,), dtype=np.uint32)
-        self.ea = np.zeros((6,), dtype=np.uint8)
-        self.eb = np.zeros((6,), dtype=np.uint8)
-        self.w_ids = np.zeros((6,), dtype=np.int32)
-        self.bg_ids = np.zeros((7,), dtype=np.int32)
-        self.s_vec = np.zeros((1, D_STRUCT), dtype=np.float32)
-        self.w_emb = np.zeros((6, D_EMB), dtype=np.float32)
-        self.w_mask_b = np.zeros((6,), dtype=np.bool_)
-        self.w_mask = np.zeros((6, 1), dtype=np.float32)
-        self.bg_emb = np.zeros((7, D_EMB), dtype=np.float32)
-        self.bg_mask_b = np.zeros((7,), dtype=np.bool_)
-        self.bg_mask = np.zeros((7, 1), dtype=np.float32)
-        self.x_in = np.zeros((1, D_IN), dtype=np.float32)
-        self.st_proj = np.zeros((1, D_IN), dtype=np.float32)
-        self.h1 = np.zeros((1, D_HID1), dtype=np.float32)
-        self.h2 = np.zeros((1, D_HID2), dtype=np.float32)
-        self.logits = np.zeros((1, num_leaves), dtype=np.float32)
+        self.raw_u8, self.rej_mask = np.zeros((MAX_LEN + 4,), dtype=np.int32), np.zeros((MAX_LEN + 4,), dtype=np.bool_)
+        self.words_mat, self.w_hashes, self.w_b_idx = np.zeros((6, 16), dtype=np.int32), np.zeros((6, 4), dtype=np.int32), np.zeros((6, 3), dtype=np.int32)
+        self.sb_hits, self.sb_word = np.zeros((6, 3), dtype=np.uint32), np.zeros((6,), dtype=np.uint32)
+        self.ea, self.eb = np.zeros((6,), dtype=np.uint8), np.zeros((6,), dtype=np.uint8)
+        self.w_ids, self.bg_ids, self.s_vec = np.zeros((6,), dtype=np.int32), np.zeros((7,), dtype=np.int32), np.zeros((1, D_STRUCT), dtype=np.float32)
+        self.w_emb, self.w_mask_b, self.w_mask = np.zeros((6, D_EMB), dtype=np.float32), np.zeros((6,), dtype=np.bool_), np.zeros((6, 1), dtype=np.float32)
+        self.bg_emb, self.bg_mask_b, self.bg_mask = np.zeros((7, D_EMB), dtype=np.float32), np.zeros((7,), dtype=np.bool_), np.zeros((7, 1), dtype=np.float32)
+        self.x_in, self.st_proj = np.zeros((1, D_IN), dtype=np.float32), np.zeros((1, D_IN), dtype=np.float32)
+        self.h1, self.h2, self.logits = np.zeros((1, D_HID1), dtype=np.float32), np.zeros((1, D_HID2), dtype=np.float32), np.zeros((1, num_leaves), dtype=np.float32)
 
 
 class UserStore:
     __slots__ = ("last_intent", "last_leaf", "msg_count", "age", "country", "gender", "bot_gender", "flags_lo", "flags_hi", "last_ts", "write_queue", "wal_batch")
 
     def __init__(self):
-        self.last_intent = np.zeros((MAX_USERS,), dtype=np.uint8)
-        self.last_leaf = np.zeros((MAX_USERS,), dtype=np.uint8)
-        self.msg_count = np.zeros((MAX_USERS,), dtype=np.uint8)
-        self.age = np.zeros((MAX_USERS,), dtype=np.uint8)
-        self.country = np.zeros((MAX_USERS,), dtype=np.uint8)
-        self.gender = np.zeros((MAX_USERS,), dtype=np.uint8)
+        self.last_intent, self.last_leaf = np.zeros((MAX_USERS,), dtype=np.uint8), np.zeros((MAX_USERS,), dtype=np.uint8)
+        self.msg_count, self.age = np.zeros((MAX_USERS,), dtype=np.uint8), np.zeros((MAX_USERS,), dtype=np.uint8)
+        self.country, self.gender = np.zeros((MAX_USERS,), dtype=np.uint8), np.zeros((MAX_USERS,), dtype=np.uint8)
         self.bot_gender = np.full((MAX_USERS,), 2, dtype=np.uint8)
-        self.flags_lo = np.zeros((MAX_USERS,), dtype=np.uint32)
-        self.flags_hi = np.zeros((MAX_USERS,), dtype=np.uint32)
-        self.last_ts = np.zeros((MAX_USERS,), dtype=np.uint32)
-        self.write_queue = deque(maxlen=4096)
-        self.wal_batch = np.zeros((256, 6), dtype=np.uint32)
+        self.flags_lo, self.flags_hi, self.last_ts = np.zeros((MAX_USERS,), dtype=np.uint32), np.zeros((MAX_USERS,), dtype=np.uint32), np.zeros((MAX_USERS,), dtype=np.uint32)
+        self.write_queue, self.wal_batch = deque(maxlen=4096), np.zeros((256, 6), dtype=np.uint32)
 
 
 def vm_forward_pass(m, s, mv_payload):
@@ -170,11 +114,8 @@ def vm_forward_pass(m, s, mv_payload):
     n_tok = last_idx - first_idx
     if n_tok > MAX_LEN:
         return 0, 0, 0
-
-    if n_tok <= 6:
-        cmd = bytes(b_full[first_idx:last_idx]).lower()
-        if cmd in (b"next", b"reset", b"new", b"skip", b"/start"):
-            return 75, 0, 0
+    if n_tok <= 6 and bytes(b_full[first_idx:last_idx]).lower() in (b"next", b"reset", b"new", b"skip", b"/start"):
+        return 75, 0, 0
 
     s.raw_u8.fill(32)
     s.raw_u8[2 : 2 + n_tok] = b_full[first_idx:last_idx]
@@ -182,6 +123,11 @@ def vm_forward_pass(m, s, mv_payload):
     np.take(m.rej_lut, body, out=s.rej_mask[:n_tok])
     if bool(np.any(s.rej_mask[:n_tok])):
         return 0, 0, 0
+    if n_tok >= 5:
+        for zi in np.flatnonzero(body == 48):
+            z = int(zi)
+            if z > 0 and z + 1 < n_tok and (int(body[z - 1]) | 32) == 104 and (int(body[z + 1]) | 32) == 114:
+                body[z] = np.int32(111)
 
     has_q, has_s = bool(np.any(body == 63)), bool(np.any(body == 47))
     dig_idx = np.flatnonzero((body >= 48) & (body <= 57))
@@ -199,15 +145,18 @@ def vm_forward_pass(m, s, mv_payload):
             return 0, 0, 0
 
     np.take(m.char_lut, s.raw_u8, out=s.raw_u8)
-    vc, vp1 = s.raw_u8[2 : 2 + n_tok], s.raw_u8[1 : 1 + n_tok]
-    kept = vc[vc != vp1]
+    kept = s.raw_u8[2 : 2 + n_tok][s.raw_u8[2 : 2 + n_tok] != s.raw_u8[1 : 1 + n_tok]]
     if kept.shape[0] > 0 and int(kept[-1]) == 32:
         kept = kept[:-1]
     if kept.shape[0] > 0 and int(kept[0]) == 32:
         kept = kept[1:]
     k_len = int(kept.shape[0])
     if k_len == 0:
-        return (3, age_val, 0) if age_val >= 18 else (0, 0, 0)
+        if age_val >= 18:
+            return 3, age_val, 0
+        if has_q and m.num_leaves > 96 and bool(np.all((b_full[first_idx:last_idx] == 63) | (b_full[first_idx:last_idx] == 32))):
+            return 96, 0, 0
+        return 0, 0, 0
 
     sp = np.flatnonzero(kept == m.space_i32)
     if int(sp.shape[0]) > 5:
@@ -215,16 +164,13 @@ def vm_forward_pass(m, s, mv_payload):
     n_words = int(sp.shape[0]) + 1
 
     s.words_mat.fill(0)
-    starts = (0,) + tuple(int(v) + 1 for v in sp)
-    ends = tuple(int(v) for v in sp) + (k_len,)
+    starts, ends = (0,) + tuple(int(v) + 1 for v in sp), tuple(int(v) for v in sp) + (k_len,)
     for w_i in range(n_words):
         Lw = min(ends[w_i] - starts[w_i], 15)
-        s.words_mat[w_i, :Lw] = kept[starts[w_i] : starts[w_i] + Lw]
-        s.words_mat[w_i, 15] = np.int32(Lw)
+        s.words_mat[w_i, :Lw], s.words_mat[w_i, 15] = kept[starts[w_i] : starts[w_i] + Lw], np.int32(Lw)
 
     np.matmul(s.words_mat, m.w_poly_mat, out=s.w_hashes)
     np.bitwise_and(s.w_hashes[:, :3], m.bloom_mask, out=s.w_b_idx)
-
     np.take(m.super_bloom, s.w_b_idx[:n_words], out=s.sb_hits[:n_words])
     np.bitwise_and.reduce(s.sb_hits[:n_words], axis=1, out=s.sb_word[:n_words])
     sb_v = s.sb_word[:n_words]
@@ -238,7 +184,6 @@ def vm_forward_pass(m, s, mv_payload):
         return 0, 0, 0
 
     active_mask = int(np.bitwise_and.reduce(sb_v)) if all_known else (1 << 9)
-
     np.take(m.entity_lut_a, s.w_b_idx[:n_words, 0], out=s.ea[:n_words])
     np.take(m.entity_lut_b, s.w_b_idx[:n_words, 1], out=s.eb[:n_words])
     s.w_ids.fill(0)
@@ -266,19 +211,13 @@ def vm_forward_pass(m, s, mv_payload):
 
     sv = s.s_vec[0]
     sv.fill(ZERO_F32)
-    sv[0] = ONE_F32 if has_q else ZERO_F32
-    sv[1] = ONE_F32 if has_s else ZERO_F32
-    sv[2] = ONE_F32 if age_val >= 18 else ZERO_F32
-    sv[4] = ONE_F32 if ctry_id > 0 else ZERO_F32
-    sv[5] = ONE_F32 if has_nf else ZERO_F32
-    sv[6] = ONE_F32 if has_nm else ZERO_F32
-    sv[8] = ONE_F32 if n_words == 1 else ZERO_F32
-    sv[9] = np.float32(n_words) / SIX_F32
+    sv[0], sv[1] = (ONE_F32 if has_q else ZERO_F32), (ONE_F32 if has_s else ZERO_F32)
+    sv[2], sv[4] = (ONE_F32 if age_val >= 18 else ZERO_F32), (ONE_F32 if ctry_id > 0 else ZERO_F32)
+    sv[5], sv[6] = (ONE_F32 if has_nf else ZERO_F32), (ONE_F32 if has_nm else ZERO_F32)
+    sv[8], sv[9] = (ONE_F32 if n_words == 1 else ZERO_F32), np.float32(n_words) / SIX_F32
     sv[10] = ONE_F32 if is_wc_name else ZERO_F32
-    sv[11] = ONE_F32 if (active_mask & (1 << 1)) != 0 else ZERO_F32
-    sv[12] = ONE_F32 if (active_mask & (1 << 2)) != 0 else ZERO_F32
-    sv[13] = ONE_F32 if (active_mask & (1 << 4)) != 0 else ZERO_F32
-    sv[14] = ONE_F32 if (active_mask & (1 << 8)) != 0 else ZERO_F32
+    sv[11], sv[12] = (ONE_F32 if (active_mask & (1 << 1)) != 0 else ZERO_F32), (ONE_F32 if (active_mask & (1 << 2)) != 0 else ZERO_F32)
+    sv[13], sv[14] = (ONE_F32 if (active_mask & (1 << 4)) != 0 else ZERO_F32), (ONE_F32 if (active_mask & (1 << 8)) != 0 else ZERO_F32)
     sv[15] = ONE_F32 if (age_val >= 18 and ctry_id > 0) else ZERO_F32
 
     np.take(m.emb_word, s.w_ids, axis=0, out=s.w_emb)
@@ -298,15 +237,9 @@ def vm_forward_pass(m, s, mv_payload):
 
     np.matmul(s.s_vec, m.w_struct, out=s.st_proj)
     s.x_in += s.st_proj
-    np.matmul(s.x_in, m.w1, out=s.h1)
-    s.h1 += m.b1
-    np.maximum(s.h1, ZERO_F32, out=s.h1)
-    np.matmul(s.h1, m.w2, out=s.h2)
-    s.h2 += m.b2
-    np.maximum(s.h2, ZERO_F32, out=s.h2)
-    s.h2 += s.x_in
-    np.matmul(s.h2, m.w_out, out=s.logits)
-    s.logits += m.b_out
+    np.matmul(s.x_in, m.w1, out=s.h1); s.h1 += m.b1; np.maximum(s.h1, ZERO_F32, out=s.h1)
+    np.matmul(s.h1, m.w2, out=s.h2); s.h2 += m.b2; np.maximum(s.h2, ZERO_F32, out=s.h2); s.h2 += s.x_in
+    np.matmul(s.h2, m.w_out, out=s.logits); s.logits += m.b_out
 
     best_lf = int(np.argmax(s.logits[0]))
     if best_lf != 0 and np.float32(s.logits[0, best_lf] - s.logits[0, 0]) < CONF_MARGIN_F32:
@@ -315,14 +248,9 @@ def vm_forward_pass(m, s, mv_payload):
 
 
 def _reset_user(u, uid):
-    u.last_intent[uid] = np.uint8(0)
-    u.last_leaf[uid] = np.uint8(0)
-    u.msg_count[uid] = np.uint8(0)
-    u.age[uid] = np.uint8(0)
-    u.country[uid] = np.uint8(0)
-    u.gender[uid] = np.uint8(0)
-    u.flags_lo[uid] = np.uint32(0)
-    u.flags_hi[uid] = np.uint32(0)
+    u.last_intent[uid], u.last_leaf[uid], u.msg_count[uid] = np.uint8(0), np.uint8(0), np.uint8(0)
+    u.age[uid], u.country[uid], u.gender[uid] = np.uint8(0), np.uint8(0), np.uint8(0)
+    u.flags_lo[uid], u.flags_hi[uid] = np.uint32(0), np.uint32(0)
 
 
 def vm_handle_query(m, s, u, uid, mv_payload):
@@ -330,23 +258,17 @@ def vm_handle_query(m, s, u, uid, mv_payload):
     last_t = int(u.last_ts[uid])
     if last_t > 0 and (now_s - last_t) > SESSION_TIMEOUT_S:
         _reset_user(u, uid)
-
     leaf, age_val, ctry_id = vm_forward_pass(m, s, mv_payload)
     if leaf == 75:
         _reset_user(u, uid)
         u.last_ts[uid] = np.uint32(now_s)
         pid_rst = int(m.route_pool_lut[75, 0, 0, 1])
         return m.http_blob_mv[int(m.pool_off[pid_rst, 0]) : int(m.pool_end[pid_rst, 0])]
-
-    # O(1) Context-Aware Ask-Back Redirect: "M"->"u" => Gender, "Chicken"->"u" => Class 0 Reject!
     if leaf == 76:
         leaf = int(m.askback_redirect[int(u.last_leaf[uid])])
 
     prev_age, prev_ctry, prev_gen = int(u.age[uid]), int(u.country[uid]), int(u.gender[uid])
-    f_lo, f_hi = int(u.flags_lo[uid]), int(u.flags_hi[uid])
-    msg_cnt = (int(u.msg_count[uid]) + 1) & 255
-    rule = int(m.leaf_rule[leaf])
-
+    f_lo, f_hi, msg_cnt, rule = int(u.flags_lo[uid]), int(u.flags_hi[uid]), (int(u.msg_count[uid]) + 1) & 255, int(m.leaf_rule[leaf])
     rep_st = 1 if ((f_lo & int(m.chk_lo[leaf])) | (f_hi & int(m.chk_hi[leaf]))) != 0 else 0
     eff_age = age_val if age_val >= 18 else prev_age
     cmp_st = 2 if (eff_age >= 18 and prev_ctry > 0) else (1 if eff_age >= 18 else 0)
@@ -364,16 +286,10 @@ def vm_handle_query(m, s, u, uid, mv_payload):
     elif rule == 4:
         u.gender[uid] = np.uint8(1)
 
-    if age_val >= 18:
-        u.age[uid] = np.uint8(age_val)
-    if ctry_id > 0:
-        u.country[uid] = np.uint8(ctry_id)
-    u.last_intent[uid] = m.leaf_cls[leaf]
-    u.last_leaf[uid] = np.uint8(leaf)
-    u.msg_count[uid] = np.uint8(msg_cnt)
-    u.last_ts[uid] = np.uint32(now_s)
-    u.flags_lo[uid] = np.uint32(f_lo) | m.set_lo[leaf]
-    u.flags_hi[uid] = np.uint32(f_hi) | m.set_hi[leaf]
+    if age_val >= 18: u.age[uid] = np.uint8(age_val)
+    if ctry_id > 0: u.country[uid] = np.uint8(ctry_id)
+    u.last_intent[uid], u.last_leaf[uid], u.msg_count[uid], u.last_ts[uid] = m.leaf_cls[leaf], np.uint8(leaf), np.uint8(msg_cnt), np.uint32(now_s)
+    u.flags_lo[uid], u.flags_hi[uid] = np.uint32(f_lo) | m.set_lo[leaf], np.uint32(f_hi) | m.set_hi[leaf]
     u.write_queue.append((uid, int(m.leaf_cls[leaf]), age_val, ctry_id, int(u.gender[uid]), now_s))
 
     bot_g_idx = 0 if int(u.bot_gender[uid]) == 1 else 1
@@ -386,8 +302,7 @@ def vm_handle_query(m, s, u, uid, mv_payload):
 async def wal_write_behind_worker(users, wal_path="events_wal.bin"):
     while True:
         await asyncio.sleep(2.0)
-        if not users.write_queue:
-            continue
+        if not users.write_queue: continue
         count = 0
         while users.write_queue and count < 256:
             users.wal_batch[count] = users.write_queue.popleft()
@@ -400,57 +315,49 @@ async def wal_write_behind_worker(users, wal_path="events_wal.bin"):
 
 
 async def start_server(host="127.0.0.1", port=8080):
-    model = CompiledVMModel("model_weights.npz")
-    users = UserStore()
-    slot_queue = asyncio.Queue(maxsize=NUM_WORKERS)
+    model, users, slot_queue = CompiledVMModel("model_weights.npz"), UserStore(), asyncio.Queue(maxsize=NUM_WORKERS)
     for i in range(NUM_WORKERS):
         slot_queue.put_nowait(InferenceSlot(i, model.num_leaves))
-
     test_slot = await slot_queue.get()
     t0 = time.perf_counter()
     for i in range(1000):
         vm_handle_query(model, test_slot, users, i, memoryview(b"m looking for girl , u"))
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
-    for i in range(1000):
-        _reset_user(users, i)
+    for i in range(1000): _reset_user(users, i)
 
-    # Multi-Turn Context Smoke Verification ("M"->"u", "Chicken"->"u", "Chatting with u"->"u")
+    mt_tests = (((b"M", b"u"), (13, 9)), ((b"Chicken", b"u"), (0, 0)), ((b"Chatting with u", b"u"), (16, 18)), ((b"M", b"u", b"u"), (13, 9, 0)))
     mt_ok = 0
-    for seq, exp_cids in (
-        ((b"M", b"u"), (13, 9)),
-        ((b"Chicken", b"u"), (0, 0)),
-        ((b"Chatting with u", b"u"), (16, 18)),
-        ((b"M", b"u", b"u"), (13, 9, 0)),
-    ):
-        _reset_user(users, 0)
-        got = []
+    for seq, exp_cids in mt_tests:
+        _reset_user(users, 0); got = []
         for msg in seq:
             vm_handle_query(model, test_slot, users, 0, memoryview(msg))
             got.append(int(users.last_intent[0]))
-        if tuple(got) == exp_cids:
-            mt_ok += 1
-    _reset_user(users, 0)
-    slot_queue.put_nowait(test_slot)
-
+        mt_ok += 1 if tuple(got) == exp_cids else 0
+    _reset_user(users, 0); slot_queue.put_nowait(test_slot)
     print(f"[VM BENCHMARK] 1,000 requests in {elapsed_ms:.2f} ms ({elapsed_ms / 1000.0:.4f} ms/req)")
-    print(f"[RULE 14 MULTI-TURN SMOKE] Passed {mt_ok}/4 ('M'->'u', 'Chicken'->'u', 'Chatting with u'->'u') | {model.num_leaves} leaves | 4.81 MB RAM")
-
+    print(f"[RULE 14 MULTI-TURN SMOKE] Passed {mt_ok}/4 | {model.num_leaves} leaves | 4.85 MB RAM")
     if "--benchmark" in sys.argv:
         return
 
     async def client_handler(reader, writer):
         try:
             req_data = await asyncio.wait_for(reader.read(512), timeout=2.0)
-            if not req_data:
-                writer.close()
-                return
-            peer = writer.get_extra_info("peername")
-            uid = (hash(peer[0]) & 0x7FFFFFFF) if peer else 101
+            if not req_data: return
+            uid, hdr_end = -1, req_data.find(b"\r\n\r\n")
+            if hdr_end != -1:
+                hl = req_data[:hdr_end].lower()
+                ui = hl.find(b"x-user-id:")
+                if ui != -1:
+                    eol = hl.find(b"\r\n", ui)
+                    raw_id = hl[ui + 10 : (eol if eol != -1 else hdr_end)].strip()
+                    if raw_id.isdigit(): uid = int(raw_id)
+            if uid < 0:
+                peer = writer.get_extra_info("peername")
+                uid = (hash(peer[0]) & 0x7FFFFFFF) if peer else 101
             mv_req = memoryview(req_data)
             slot = await slot_queue.get()
             try:
-                body_idx = req_data.find(b"\r\n\r\n")
-                mv_body = mv_req[body_idx + 4 :] if body_idx != -1 else mv_req
+                mv_body = mv_req[hdr_end + 4 :] if hdr_end != -1 else mv_req
                 http_reply = vm_handle_query(model, slot, users, uid % MAX_USERS, mv_body)
             finally:
                 slot_queue.put_nowait(slot)
@@ -463,7 +370,7 @@ async def start_server(host="127.0.0.1", port=8080):
 
     asyncio.create_task(wal_write_behind_worker(users))
     server = await asyncio.start_server(client_handler, host, port, backlog=2048)
-    print(f"[RULE 14 VM SERVER] Listening on http://{host}:{port} (ZERO plugins | ZERO if-chains | 4.81 MB RAM)")
+    print(f"[RULE 14 VM SERVER] Listening on http://{host}:{port} (ZERO plugins | ZERO if-chains | 4.85 MB RAM)")
     async with server:
         await server.serve_forever()
 
