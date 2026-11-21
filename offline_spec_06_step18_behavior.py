@@ -2,8 +2,10 @@
 # FILE: offline_spec_06_step18_behavior.py
 # PURPOSE: Rule 15 Offline Spec Module 6 — Step 18 Human Behavior NLU Pack (Classes 55-61, Leaves 96-102)
 #          Adds Pure '?', Insistence, State/City Ask, NTMU variants, Dry Tokens, Horny & Secret Ask
-#          Auto-discovered by offline_fsm_compiler.py & offline_train.py — ZERO regression on Steps 1-17!
+#          Loads all 6 build_step18_behavior_txt.py outputs (s18_*.txt) — ZERO regression on Steps 1-17!
 # RULES: Enforces Rules 1-15 (<= 220 lines, zero float64/int64, power-of-2 pool lengths, zero old-spec collisions)
+
+import numpy as np
 
 from offline_fsm_compiler import F_GREETED, F_ZERO
 
@@ -109,7 +111,7 @@ CORE_LEAF_SEEDS = {
     ),
     100: (
         "hm", "hmm", "hmmm", "um", "umm", "ummm", "idc", "oko", "gt", "mhm", "meh",
-        "uh", "uhh", "oh", "ohh", "ah", "ahh", "oh ok", "oh okay", "ah ok", "ah okay",
+        "uh", "uhh", "uhhh", "oh", "ohh", "ah", "ahh", "oh ok", "oh okay", "ah ok", "ah okay",
     ),
     101: (
         "horny", "horny?", "im horny", "i'm horny", "lm horny", "so horny", "very horny",
@@ -117,9 +119,9 @@ CORE_LEAF_SEEDS = {
         "are u horny", "are u horny?", "are you horny", "r u horny", "u horny?", "u horny",
     ),
     102: (
-        "tell me a secret", "tell me your secret", "tell me ur secret", "whats ur secret",
-        "what is your secret", "got any secrets", "got any secrets?", "any secrets?",
-        "share a secret", "do u have a secret", "tell me something secret",
+        "tell me a secret", "tell me a secret?", "tell me your secret", "tell me ur secret",
+        "whats ur secret", "what is your secret", "got any secrets", "got any secrets?",
+        "any secrets?", "share a secret", "do u have a secret", "tell me something secret",
     ),
 }
 
@@ -139,3 +141,16 @@ MULTI_TURN_SUITE = (
     ((b"tell me a secret", b"u?"), (102, 102)),
     ((b"glad to meet u", b"u?"), (99, 99)),
 )
+
+
+def load_txt_samples(sample_map, load_fn):
+    for lf, fn in (
+        (97, "s18_insist.txt"),
+        (98, "s18_state_city.txt"),
+        (99, "s18_ntmu.txt"),
+        (100, "s18_dry.txt"),
+        (101, "s18_horny.txt"),
+        (102, "s18_secret.txt"),
+    ):
+        for s in load_fn(fn, 400):
+            sample_map[s] = (lf, np.float32(5.0))
